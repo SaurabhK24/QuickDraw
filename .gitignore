@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+.env
+.venv/
+venv/
+
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# Runtime workspace data
+sessions/
+memory/
+exec-approvals.json

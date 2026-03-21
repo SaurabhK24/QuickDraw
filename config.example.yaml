@@ -1,0 +1,75 @@
+# QuickDraw Configuration
+# Copy this to ~/.quickdraw/config.yaml and customize.
+
+workspace: ~/.quickdraw
+
+# --- LLM Provider ---
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-5-20250929
+  max_tokens: 4096
+
+# --- Agent Definitions ---
+# Each agent has a name, a SOUL file (personality), and optionally a model override.
+# Paths are relative to the workspace directory.
+agents:
+  main:
+    name: Jarvis
+    soul: SOUL.md
+
+  researcher:
+    name: Scout
+    soul: souls/researcher.md
+
+# --- Channels ---
+# Enable the channels you want. Each channel normalizes messages and routes
+# them through the same agent with shared sessions and memory.
+channels:
+  # Terminal REPL — always useful for testing
+  repl:
+    enabled: true
+
+  # Discord — listens for DMs and @mentions
+  # Requires: pip install 'quickdraw[discord]'
+  discord:
+    enabled: false
+    token: ${DISCORD_BOT_TOKEN}
+    session_scope: per-user  # per-user | per-channel | per-channel-peer
+
+  # HTTP API — POST /chat for programmatic access
+  http:
+    enabled: false
+    port: 5000
+    host: 127.0.0.1
+
+# --- Heartbeats ---
+# Scheduled agent tasks. Each heartbeat runs on a cron schedule with its
+# own isolated session so it doesn't clutter interactive conversations.
+heartbeats:
+  morning-briefing:
+    schedule: "30 7 * * *"
+    agent: main
+    prompt: "Good morning! Check the date and give me a motivational quote."
+
+# --- Permission Controls ---
+# Controls which shell commands the agent can run without approval.
+#   ask:    prompt the user for approval on unknown commands
+#   record: allow but log for review
+#   ignore: allow everything
+permissions:
+  mode: ask
+  safe_commands:
+    - ls
+    - cat
+    - head
+    - tail
+    - wc
+    - date
+    - whoami
+    - echo
+    - pwd
+    - which
+    - git
+    - python
+    - node
+    - npm
