@@ -71,10 +71,21 @@ class PermissionsConfig:
 
 
 @dataclass
+class LLMProviderConfig:
+    provider: str
+    model: str
+    max_tokens: int | None = None
+    api_key: str | None = None
+
+
+@dataclass
 class LLMConfig:
+    # Back-compat single-provider config
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-5-20250929"
     max_tokens: int = 4096
+    # New: ordered providers for failover/rotation
+    providers: list[LLMProviderConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -119,10 +130,25 @@ def load_config(path: str | Path) -> Config:
     workspace = Path(raw.get("workspace", "~/.quickdraw")).expanduser()
 
     llm_raw = raw.get("llm", {})
+    providers_raw = llm_raw.get("providers") or []
+    providers: list[LLMProviderConfig] = []
+    for p in providers_raw:
+        if not isinstance(p, dict):
+            continue
+        providers.append(
+            LLMProviderConfig(
+                provider=p.get("provider", "anthropic"),
+                model=p.get("model", "claude-sonnet-4-5-20250929"),
+                max_tokens=p.get("max_tokens"),
+                api_key=p.get("api_key"),
+            )
+        )
+
     llm = LLMConfig(
         provider=llm_raw.get("provider", "anthropic"),
         model=llm_raw.get("model", "claude-sonnet-4-5-20250929"),
         max_tokens=llm_raw.get("max_tokens", 4096),
+        providers=providers,
     )
 
     agents: dict[str, AgentConfig] = {}
