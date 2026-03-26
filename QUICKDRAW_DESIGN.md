@@ -12,6 +12,15 @@ QuickDraw V2 turns the current single-process agent runtime into a lightweight p
 - Make workflows typed and auditable; keep unconstrained chat as a narrow mode.
 - Treat tools, connectors, and memory as governed infrastructure, not prompt-driven side effects.
 
+## Architectural Decisions
+
+- `Postgres` is the primary system of record. Do not introduce Mongo in the first major platform revision.
+- `Temporal` owns durable workflow state transitions; `Postgres` owns product metadata and queryable state.
+- `Go` is the only public edge and reverse proxy. `Python` workers are private services.
+- Risky tools execute out of process in sandboxed workers.
+- Shared business agents are modeled as conversations, participants, subscriptions, and outbound deliveries, not as direct reply callbacks.
+- New enterprise channels should target `MS Teams` first. `Signal` is optional and lower priority.
+
 ## Target Architecture
 
 ```mermaid
@@ -78,6 +87,20 @@ Responsibilities:
 - Typed input/output envelopes for auditing
 
 Risky tools should never execute inside the same process as the control plane or agent workers.
+
+### Shared channel model
+
+QuickDraw V2 should support shared agents that can be subscribed to by multiple users and can speak back into shared channels or direct subscriber targets.
+
+Minimum shared messaging concepts:
+
+- `conversation`: logical thread or shared business context
+- `participant`: human or agent member of a conversation
+- `subscription`: who receives updates for a conversation or workflow
+- `delivery_target`: Teams thread, Signal chat, webhook, email, or internal inbox
+- `outbound_message`: a durable outbound event awaiting delivery and retry
+
+This replaces the current one-request one-reply callback model with a durable event and delivery model that is better suited to enterprise workflows.
 
 ## Workflow Runtime
 
@@ -194,6 +217,20 @@ Packaging guidance:
 
 The Go control plane can sit in front of Python services as a reverse proxy and orchestration layer, while a second Python API client can call the Go API for run submission, approvals, and run status polling.
 
+## Channel Strategy
+
+Initial channel priorities:
+
+- `HTTP API` remains the platform integration surface.
+- `MS Teams` is the first enterprise messaging channel.
+- `Discord` stays useful for internal development and demos.
+- `Signal` is deferred until the shared conversation and outbound delivery model is in place.
+
+Reasoning:
+
+- Teams is enterprise-native and maps well to shared threads, tenants, and approvals.
+- Signal is feasible, but should not shape the initial platform architecture.
+
 ## Observability
 
 Adopt OpenTelemetry early and treat agent runs like production workflows.
@@ -233,3 +270,22 @@ Graduate or replace:
 - `quickdraw/tools/shell.py` with remote sandbox execution
 - `quickdraw/tools/filesystem.py` with scoped file services
 - `quickdraw/tools/memory_tools.py` with governed retrieval and durable memory records
+
+## Branch Scope
+
+This branch should carry the first major architectural slice, not every platform feature at once.
+
+In scope for the first major branch:
+
+- Postgres-backed tenant, agent, workflow, run, approval, and audit models
+- Go control plane skeleton with auth middleware and core API routes
+- Temporal workflow bootstrap for durable runs
+- Python worker boundary for agent execution
+- Remote tool execution interface, even if only one sandbox worker is implemented first
+
+Out of scope for the first major branch:
+
+- Full enterprise UI
+- Full connector catalog
+- Complete Signal support
+- Medical RCM-specific compliance logic

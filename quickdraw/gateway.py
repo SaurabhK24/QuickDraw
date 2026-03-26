@@ -5,6 +5,7 @@ The gateway is the single entry point. It:
   2. Instantiates enabled channels
   3. Sets up the agent loop, tools, sessions, and queue
   4. Routes inbound messages from any channel through the agent
+  5. Dual-writes run and audit records to Postgres when the platform DB is configured
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import uuid
 from typing import Any
 
 from quickdraw.channels.base import ChannelAdapter, ReplyFn
@@ -20,9 +22,16 @@ from quickdraw.core.loop import AgentLoop
 from quickdraw.core.permissions import PermissionManager
 from quickdraw.core.queue import CommandQueue, _QueueContext
 from quickdraw.core.session import SessionManager
+try:
+    from quickdraw.platform import db as platform_db
+except ImportError:
+    platform_db = None  # type: ignore[assignment]
 from quickdraw.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+_default_tenant_id: uuid.UUID | None = None
+_temporal_client: Any = None
 
 
 class Gateway:
@@ -101,6 +110,12 @@ class Gateway:
 
         agent_session_key = f"{agent_cfg.name.lower()}:{session_key}"
 
+        run_id: uuid.UUID | None = None
+        tenant_id = _default_tenant_id
+
+        if platform_db and platform_db.is_available() and tenant_id is not None:
+            run_id = await self._record_run_start(tenant_id, agent_session_key, agent_id)
+
         ctx = _QueueContext(self.queue, agent_session_key)
         async with ctx:
             messages = self.sessions.load(agent_session_key)
@@ -122,12 +137,93 @@ class Gateway:
 
             self.sessions.save(agent_session_key, messages)
 
+        if platform_db and platform_db.is_available() and run_id is not None and tenant_id is not None:
+            await self._record_run_end(tenant_id, run_id, response_text)
+
         agent_label = f"[{agent_cfg.name}] " if len(self.config.agents) > 1 else ""
         await reply_fn(f"{agent_label}{response_text}")
 
+    # ------------------------------------------------------------------
+    # Platform dual-write helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _record_run_start(
+        tenant_id: uuid.UUID, session_key: str, agent_id: str,
+    ) -> uuid.UUID | None:
+        from quickdraw.platform.repositories import create_run, record_audit_event
+
+        try:
+            async with platform_db.get_session() as session:
+                run = await create_run(
+                    session,
+                    tenant_id=tenant_id,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                )
+                await record_audit_event(
+                    session,
+                    tenant_id=tenant_id,
+                    event_type="run.started",
+                    run_id=run.id,
+                    payload={"session_key": session_key, "agent_id": agent_id},
+                )
+                return run.id
+        except Exception:
+            logger.warning("Platform: failed to record run start", exc_info=True)
+            return None
+
+    @staticmethod
+    async def _record_run_end(
+        tenant_id: uuid.UUID, run_id: uuid.UUID, response_text: str,
+    ) -> None:
+        from quickdraw.platform.repositories import (
+            complete_run,
+            create_run_step,
+            record_audit_event,
+        )
+
+        try:
+            async with platform_db.get_session() as session:
+                await create_run_step(
+                    session,
+                    run_id=run_id,
+                    step_kind="model_response",
+                    payload={"response_preview": response_text[:500]},
+                )
+                await complete_run(session, run_id, status="completed")
+                await record_audit_event(
+                    session,
+                    tenant_id=tenant_id,
+                    event_type="run.completed",
+                    run_id=run_id,
+                )
+        except Exception:
+            logger.warning("Platform: failed to record run end", exc_info=True)
+
     async def start(self) -> None:
         """Start all enabled channels and background services."""
+        global _default_tenant_id, _temporal_client
+
         self.config.ensure_dirs()
+
+        if self.config.database_url and platform_db:
+            await platform_db.init_db(self.config.database_url)
+            from quickdraw.platform.repositories import get_or_create_default_tenant
+            async with platform_db.get_session() as session:
+                tenant = await get_or_create_default_tenant(session)
+                _default_tenant_id = tenant.id
+            logger.info("Platform DB ready — tenant=%s", _default_tenant_id)
+
+        temporal_addr = self.config.temporal_address
+        if temporal_addr:
+            try:
+                from temporalio.client import Client
+                _temporal_client = await Client.connect(temporal_addr)
+                logger.info("Temporal client connected — %s", temporal_addr)
+            except Exception:
+                logger.warning("Temporal connection failed", exc_info=True)
+                _temporal_client = None
 
         if self.config.heartbeats:
             from quickdraw.heartbeat import HeartbeatScheduler
@@ -159,6 +255,9 @@ class Gateway:
                 await ch.stop()
             except Exception as e:
                 logger.error("Error stopping channel %s: %s", ch.channel_id, e)
+
+        if platform_db:
+            await platform_db.close_db()
 
     def run(self) -> None:
         """Run the gateway (blocking). Sets up signal handlers for clean shutdown."""

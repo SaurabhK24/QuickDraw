@@ -17,14 +17,25 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+platform = [
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
+    "temporalio",
+]
 discord = ["discord.py"]
 all = [
     "discord.py",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
 ]
 dev = [
     "pytest",
     "pytest-asyncio",
     "ruff",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
 ]
 
 [project.scripts]

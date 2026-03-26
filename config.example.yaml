@@ -3,6 +3,15 @@
 
 workspace: ~/.quickdraw
 
+# --- Platform Database (optional) ---
+# When set, QuickDraw records runs, audit events, and platform state to Postgres.
+# Requires: pip install 'quickdraw[platform]'
+# database_url: postgresql+asyncpg://quickdraw:quickdraw@localhost:5432/quickdraw
+
+# --- Temporal (optional) ---
+# When set, QuickDraw can submit durable runs to a Temporal cluster.
+# temporal_address: localhost:7233
+
 # --- LLM Provider ---
 llm:
   provider: anthropic
