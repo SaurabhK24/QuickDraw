@@ -24,8 +24,14 @@ platform = [
     "temporalio",
 ]
 discord = ["discord.py"]
+teams = [
+    "botbuilder-core",
+    "botbuilder-integration-aiohttp",
+]
 all = [
     "discord.py",
+    "botbuilder-core",
+    "botbuilder-integration-aiohttp",
     "sqlalchemy[asyncio]",
     "asyncpg",
     "alembic",

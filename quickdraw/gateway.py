@@ -92,6 +92,9 @@ class Gateway:
         elif kind == "http":
             from quickdraw.channels.http_api import HttpApiChannel
             return HttpApiChannel(kind, settings)
+        elif kind == "teams":
+            from quickdraw.channels.teams_channel import TeamsChannel
+            return TeamsChannel(kind, settings)
         else:
             logger.warning("Unknown channel type: %s", kind)
             return None

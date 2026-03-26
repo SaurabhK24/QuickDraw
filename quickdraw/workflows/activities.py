@@ -35,7 +35,8 @@ async def execute_agent_turn(input: AgentRunInput) -> AgentRunOutput:
     This activity wraps the current AgentLoop so Temporal can schedule,
     retry, and track it as a durable unit of work.
     """
-    from quickdraw.config import AgentConfig
+    from pathlib import Path
+
     from quickdraw.core.loop import AgentLoop
     from quickdraw.core.session import SessionManager
     from quickdraw.tools.registry import ToolRegistry
@@ -53,10 +54,17 @@ async def execute_agent_turn(input: AgentRunInput) -> AgentRunOutput:
 
     loop = AgentLoop(registry)
 
-    messages: list[dict[str, Any]] = []
+    workspace = Path("/app/.quickdraw") if Path("/app/.quickdraw").exists() else Path.home() / ".quickdraw"
+    sessions = SessionManager(workspace / "sessions")
+    messages = sessions.load(input.session_key)
+
     messages.append({"role": "user", "content": input.user_text})
 
-    system_prompt = f"You are {input.agent_id}, a helpful AI assistant."
+    soul_path = workspace / "SOUL.md"
+    if soul_path.exists():
+        system_prompt = soul_path.read_text()
+    else:
+        system_prompt = f"You are {input.agent_id}, a helpful AI assistant."
 
     response_text, messages = await loop.run(
         messages=messages,
@@ -65,7 +73,10 @@ async def execute_agent_turn(input: AgentRunInput) -> AgentRunOutput:
         max_tokens=input.max_tokens,
     )
 
+    sessions.save(input.session_key, messages)
+
     return AgentRunOutput(
         response_text=response_text,
+        run_id=input.session_key,
         step_count=len(messages),
     )

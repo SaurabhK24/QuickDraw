@@ -43,8 +43,11 @@ services:
       dockerfile: Dockerfile
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      MS_APP_ID: ${MS_APP_ID:-}
+      MS_APP_PASSWORD: ${MS_APP_PASSWORD:-}
     ports:
       - "5050:5000"
+      - "3978:3978"
     command:
       - /bin/sh
       - -c
@@ -52,12 +55,21 @@ services:
         mkdir -p /app/.quickdraw/sessions /app/.quickdraw/memory
         cp /app/SOUL.md /app/.quickdraw/SOUL.md
         python -c "
-        import yaml
+        import os, yaml
+        channels = {'http': {'enabled': True, 'port': 5000, 'host': '0.0.0.0'}}
+        if os.environ.get('MS_APP_ID'):
+            channels['teams'] = {
+                'enabled': True,
+                'app_id': os.environ['MS_APP_ID'],
+                'app_password': os.environ.get('MS_APP_PASSWORD', ''),
+                'port': 3978,
+                'host': '0.0.0.0',
+            }
         cfg = {
           'workspace': '/app/.quickdraw',
           'llm': {'provider': 'anthropic', 'model': 'claude-sonnet-4-5-20250929', 'max_tokens': 4096},
           'agents': {'main': {'name': 'Jarvis', 'soul': 'SOUL.md'}},
-          'channels': {'http': {'enabled': True, 'port': 5000, 'host': '0.0.0.0'}},
+          'channels': channels,
           'permissions': {'mode': 'record', 'safe_commands': ['ls','cat','echo','date','pwd','whoami']},
         }
         yaml.dump(cfg, open('/tmp/config.yaml', 'w'))
@@ -75,6 +87,8 @@ services:
       - /bin/sh
       - -c
       - |
+        mkdir -p /app/.quickdraw/sessions /app/.quickdraw/memory
+        cp /app/SOUL.md /app/.quickdraw/SOUL.md
         echo "Waiting for Temporal..."
         until python -c "import socket; s=socket.create_connection(('temporal',7233),2); s.close()" 2>/dev/null; do
           sleep 3
@@ -92,10 +106,12 @@ services:
     environment:
       PORT: "8080"
       PYTHON_BACKEND: http://quickdraw-python:5000
+      TEMPORAL_ADDRESS: temporal:7233
     ports:
       - "8080:8080"
     depends_on:
       - quickdraw-python
+      - temporal
 
 volumes:
   temporal_pgdata:

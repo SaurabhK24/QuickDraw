@@ -51,6 +51,16 @@ channels:
     port: 5000
     host: 127.0.0.1
 
+  # Microsoft Teams — Bot Framework webhook
+  # Requires: pip install 'quickdraw[teams]'
+  # Register a bot at https://dev.botframework.com and set the messaging
+  # endpoint to https://<your-host>/api/messages
+  teams:
+    enabled: false
+    app_id: ${MS_APP_ID}
+    app_password: ${MS_APP_PASSWORD}
+    port: 3978
+
 # --- Heartbeats ---
 # Scheduled agent tasks. Each heartbeat runs on a cron schedule with its
 # own isolated session so it doesn't clutter interactive conversations.

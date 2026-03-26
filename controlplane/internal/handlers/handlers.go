@@ -7,12 +7,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/quickdraw/controlplane/internal/middleware"
+	"github.com/quickdraw/controlplane/internal/temporal"
 )
 
 func jsonResp(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+func jsonErr(w http.ResponseWriter, status int, msg string) {
+	jsonResp(w, status, map[string]string{"error": msg})
 }
 
 func tenant(r *http.Request) string {
@@ -22,10 +27,7 @@ func tenant(r *http.Request) string {
 	return "default"
 }
 
-// ---------------------------------------------------------------------------
-// Health
-// ---------------------------------------------------------------------------
-
+// Health returns service status.
 func Health(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, http.StatusOK, map[string]string{
 		"status":    "ok",
@@ -35,54 +37,133 @@ func Health(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// Runs
+// Runs — wired to Temporal
 // ---------------------------------------------------------------------------
 
+type createRunRequest struct {
+	AgentID          string `json:"agent_id"`
+	UserText         string `json:"user_text"`
+	SessionKey       string `json:"session_key"`
+	Model            string `json:"model"`
+	MaxTokens        int    `json:"max_tokens"`
+	RequiresApproval bool   `json:"requires_approval"`
+}
+
 func CreateRun(w http.ResponseWriter, r *http.Request) {
-	var body map[string]any
-	json.NewDecoder(r.Body).Decode(&body)
+	var body createRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if body.UserText == "" {
+		jsonErr(w, http.StatusBadRequest, "user_text is required")
+		return
+	}
+	if body.AgentID == "" {
+		body.AgentID = "main"
+	}
+	if body.SessionKey == "" {
+		body.SessionKey = "api:" + tenant(r)
+	}
+	if body.Model == "" {
+		body.Model = "claude-sonnet-4-5-20250929"
+	}
+	if body.MaxTokens == 0 {
+		body.MaxTokens = 4096
+	}
+
+	input := temporal.DurableRunInput{
+		TenantID:         tenant(r),
+		SessionKey:       body.SessionKey,
+		AgentID:          body.AgentID,
+		UserText:         body.UserText,
+		Model:            body.Model,
+		MaxTokens:        body.MaxTokens,
+		RequiresApproval: body.RequiresApproval,
+	}
+
+	workflowID, runID, err := temporal.StartRun(r.Context(), input)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "failed to start run: "+err.Error())
+		return
+	}
 
 	jsonResp(w, http.StatusAccepted, map[string]any{
-		"run_id":    "stub-run-id",
-		"tenant":    tenant(r),
-		"status":    "pending",
-		"message":   "Run creation will be wired to Temporal in Phase 3",
+		"workflow_id": workflowID,
+		"run_id":      runID,
+		"tenant":      tenant(r),
+		"status":      "running",
 	})
 }
 
 func GetRun(w http.ResponseWriter, r *http.Request) {
-	runID := chi.URLParam(r, "runID")
-	jsonResp(w, http.StatusOK, map[string]any{
-		"run_id": runID,
-		"tenant": tenant(r),
-		"status": "stub",
-	})
+	workflowID := chi.URLParam(r, "runID")
+
+	output, status, err := temporal.GetRunResult(r.Context(), workflowID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "failed to get run: "+err.Error())
+		return
+	}
+
+	resp := map[string]any{
+		"workflow_id": workflowID,
+		"tenant":      tenant(r),
+		"status":      status,
+	}
+	if output != nil {
+		resp["response_text"] = output.ResponseText
+		resp["step_count"] = output.StepCount
+	}
+
+	jsonResp(w, http.StatusOK, resp)
 }
 
 func CancelRun(w http.ResponseWriter, r *http.Request) {
-	runID := chi.URLParam(r, "runID")
+	workflowID := chi.URLParam(r, "runID")
+
+	if err := temporal.CancelRun(r.Context(), workflowID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "failed to cancel: "+err.Error())
+		return
+	}
+
 	jsonResp(w, http.StatusOK, map[string]any{
-		"run_id":  runID,
-		"status":  "cancelled",
-		"message": "Cancellation will signal Temporal in Phase 3",
+		"workflow_id": workflowID,
+		"status":      "cancelled",
 	})
 }
 
 // ---------------------------------------------------------------------------
-// Approvals
+// Approvals — signal a running workflow
 // ---------------------------------------------------------------------------
+
+type approvalRequest struct {
+	Approved bool `json:"approved"`
+}
 
 func ApprovalDecision(w http.ResponseWriter, r *http.Request) {
-	approvalID := chi.URLParam(r, "approvalID")
+	workflowID := chi.URLParam(r, "approvalID")
+
+	var body approvalRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if err := temporal.SignalApproval(r.Context(), workflowID, body.Approved); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "failed to signal approval: "+err.Error())
+		return
+	}
+
 	jsonResp(w, http.StatusOK, map[string]any{
-		"approval_id": approvalID,
-		"status":      "acknowledged",
-		"message":     "Approval decisions will resume Temporal workflows in Phase 3",
+		"workflow_id": workflowID,
+		"approved":    body.Approved,
+		"status":      "signaled",
 	})
 }
 
 // ---------------------------------------------------------------------------
-// Agents
+// Agents — read from config (no DB yet)
 // ---------------------------------------------------------------------------
 
 func ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -95,13 +176,7 @@ func ListAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func CreateAgent(w http.ResponseWriter, r *http.Request) {
-	var body map[string]any
-	json.NewDecoder(r.Body).Decode(&body)
-	jsonResp(w, http.StatusCreated, map[string]any{
-		"status":  "created",
-		"tenant":  tenant(r),
-		"message": "Agent persistence will use Postgres models from Phase 1",
-	})
+	jsonErr(w, http.StatusNotImplemented, "agent creation requires database (future phase)")
 }
 
 // ---------------------------------------------------------------------------
@@ -109,17 +184,11 @@ func CreateAgent(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func CreateWorkflow(w http.ResponseWriter, r *http.Request) {
-	var body map[string]any
-	json.NewDecoder(r.Body).Decode(&body)
-	jsonResp(w, http.StatusCreated, map[string]any{
-		"status":  "created",
-		"tenant":  tenant(r),
-		"message": "Workflow persistence will use Postgres models from Phase 1",
-	})
+	jsonErr(w, http.StatusNotImplemented, "workflow creation requires database (future phase)")
 }
 
 // ---------------------------------------------------------------------------
-// Events (SSE stub)
+// Events (SSE)
 // ---------------------------------------------------------------------------
 
 func EventStream(w http.ResponseWriter, r *http.Request) {
@@ -135,9 +204,8 @@ func EventStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data, _ := json.Marshal(map[string]string{
-		"type":    "connected",
-		"tenant":  tenant(r),
-		"message": "Event streaming will emit run and approval events",
+		"type":   "connected",
+		"tenant": tenant(r),
 	})
 	w.Write([]byte("data: "))
 	w.Write(data)

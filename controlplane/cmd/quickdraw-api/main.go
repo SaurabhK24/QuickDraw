@@ -13,11 +13,17 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/quickdraw/controlplane/internal/handlers"
 	"github.com/quickdraw/controlplane/internal/middleware"
+	"github.com/quickdraw/controlplane/internal/temporal"
 )
 
 func main() {
 	port := envOr("PORT", "8080")
 	pythonBackend := envOr("PYTHON_BACKEND", "http://127.0.0.1:5000")
+
+	if err := temporal.Connect(); err != nil {
+		log.Fatalf("Temporal: %v", err)
+	}
+	defer temporal.Close()
 
 	r := chi.NewRouter()
 
@@ -50,7 +56,6 @@ func main() {
 		r.Get("/events/stream", handlers.EventStream)
 	})
 
-	// Reverse proxy: /chat -> Python HTTP channel
 	backendURL, err := url.Parse(pythonBackend)
 	if err != nil {
 		log.Fatalf("invalid PYTHON_BACKEND: %v", err)
