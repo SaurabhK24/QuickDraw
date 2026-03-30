@@ -64,8 +64,12 @@ func main() {
 
 		r.Post("/workflows", handlers.CreateWorkflow)
 
+		r.Post("/chat/send", handlers.ChatSend)
+
 		r.Get("/events/stream", handlers.EventStream)
 	})
+
+	handlers.PythonBackend = pythonBackend
 
 	backendURL, err := url.Parse(pythonBackend)
 	if err != nil {
@@ -76,6 +80,15 @@ func main() {
 		proxy.ServeHTTP(w, r)
 	})
 	r.Get("/chat/health", func(w http.ResponseWriter, r *http.Request) {
+		proxy.ServeHTTP(w, r)
+	})
+	r.Get("/sessions", func(w http.ResponseWriter, r *http.Request) {
+		proxy.ServeHTTP(w, r)
+	})
+	r.Get("/sessions/{key}", func(w http.ResponseWriter, r *http.Request) {
+		proxy.ServeHTTP(w, r)
+	})
+	r.Get("/progress", func(w http.ResponseWriter, r *http.Request) {
 		proxy.ServeHTTP(w, r)
 	})
 

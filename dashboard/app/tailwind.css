@@ -74,6 +74,85 @@
   .signal-bar {
     @apply h-2 rounded-full;
   }
+
+  .markdown {
+    @apply text-zinc-300 text-sm leading-relaxed;
+  }
+  .markdown h1 {
+    @apply text-xl font-bold text-zinc-100 mt-6 mb-3 pb-2 border-b border-zinc-800;
+  }
+  .markdown h2 {
+    @apply text-lg font-semibold text-zinc-100 mt-5 mb-2.5;
+  }
+  .markdown h3 {
+    @apply text-base font-semibold text-zinc-200 mt-4 mb-2;
+  }
+  .markdown h4 {
+    @apply text-sm font-semibold text-zinc-200 mt-3 mb-1.5;
+  }
+  .markdown p {
+    @apply mb-3 last:mb-0;
+  }
+  .markdown strong {
+    @apply font-semibold text-zinc-100;
+  }
+  .markdown em {
+    @apply italic text-zinc-400;
+  }
+  .markdown a {
+    @apply text-sand-400 hover:text-sand-300 underline underline-offset-2;
+  }
+  .markdown ul {
+    @apply list-disc pl-5 mb-3 space-y-1;
+  }
+  .markdown ol {
+    @apply list-decimal pl-5 mb-3 space-y-1;
+  }
+  .markdown li {
+    @apply text-zinc-300;
+  }
+  .markdown li > p {
+    @apply mb-1;
+  }
+  .markdown blockquote {
+    @apply border-l-2 border-sand-500/40 pl-4 my-3 text-zinc-400 italic;
+  }
+  .markdown code {
+    @apply font-mono text-xs bg-zinc-800 text-sand-300 px-1.5 py-0.5 rounded;
+  }
+  .markdown pre {
+    @apply bg-zinc-800/80 border border-zinc-700/50 rounded-lg p-4 my-3 overflow-x-auto;
+  }
+  .markdown pre code {
+    @apply bg-transparent p-0 text-zinc-300;
+  }
+  .markdown hr {
+    @apply border-zinc-800 my-4;
+  }
+  .markdown table {
+    @apply w-full my-3 text-xs;
+  }
+  .markdown thead {
+    @apply border-b border-zinc-700;
+  }
+  .markdown th {
+    @apply text-left py-2 px-3 font-semibold text-zinc-200 bg-zinc-800/50;
+  }
+  .markdown th:first-child {
+    @apply rounded-tl-lg;
+  }
+  .markdown th:last-child {
+    @apply rounded-tr-lg;
+  }
+  .markdown td {
+    @apply py-2 px-3 border-b border-zinc-800/50;
+  }
+  .markdown tbody tr:hover {
+    @apply bg-zinc-800/30;
+  }
+  .markdown img {
+    @apply rounded-lg my-3 max-w-full;
+  }
 }
 
 @keyframes pulse-slow {

@@ -42,6 +42,9 @@ class WorkflowStep:
     agent: str
     prompt_template: str = "{input}"
     requires_approval: bool = False
+    retry_if: str = ""
+    retry_step: int = -1
+    max_retries: int = 2
 
 
 @dataclass
@@ -113,6 +116,9 @@ def load_pack(pack_dir: Path) -> Pack | None:
                 agent=step_raw["agent"],
                 prompt_template=step_raw.get("prompt_template", "{input}"),
                 requires_approval=step_raw.get("requires_approval", False),
+                retry_if=step_raw.get("retry_if", ""),
+                retry_step=step_raw.get("retry_step", -1),
+                max_retries=step_raw.get("max_retries", 2),
             ))
         workflows[wf_id] = PackWorkflowDef(
             id=wf_id,
@@ -267,10 +273,15 @@ def build_router_context(packs: dict[str, Pack]) -> str:
 
     lines.extend([
         "## Routing rules:",
-        "1. If the user's message clearly matches a pack's domain, route to the best-fit agent in that pack.",
-        "2. If a workflow matches, route to the workflow instead of a single agent.",
-        "3. If the message is ambiguous or general-purpose, route to 'default.main'.",
-        "4. Always respond with ONLY a JSON object: {\"target\": \"pack.agent_or_workflow\", \"type\": \"agent\" or \"workflow\", \"reasoning\": \"brief reason\"}",
+        "1. For COMPLEX tasks that span multiple domains or need multiple specialists working together, "
+        "route to the supervisor: {\"target\": \"core.supervisor\", \"type\": \"supervisor\", \"reasoning\": \"...\"}",
+        "2. If a specific workflow matches (user wants a defined pipeline), route to the workflow: "
+        "{\"target\": \"pack.workflow\", \"type\": \"workflow\", \"reasoning\": \"...\"}",
+        "3. If the task clearly fits a single specialist, route directly: "
+        "{\"target\": \"pack.agent\", \"type\": \"agent\", \"reasoning\": \"...\"}",
+        "4. If ambiguous or general-purpose, route to 'default.main' as type 'agent'.",
+        "5. Always respond with ONLY a JSON object: "
+        "{\"target\": \"...\", \"type\": \"agent\" or \"workflow\" or \"supervisor\", \"reasoning\": \"brief reason\"}",
     ])
 
     return "\n".join(lines)

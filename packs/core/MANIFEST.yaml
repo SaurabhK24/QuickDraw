@@ -1,0 +1,31 @@
+id: core
+name: Core Orchestration
+description: >
+  Self-orchestrating supervisor agent that autonomously decomposes complex
+  tasks and delegates to specialist agents across all installed packs. Routes
+  here for multi-domain tasks, complex analyses, or anything that benefits
+  from coordinated specialist work.
+version: "1.0"
+
+agents:
+  supervisor:
+    name: Supervisor
+    soul: souls/supervisor.md
+    tools:
+      - delegate_to_agent
+      - delegate_parallel
+      - list_available_agents
+      - shared_memory_write
+      - shared_memory_read
+      - shared_memory_list
+      - web_search
+      - memory
+
+router:
+  description: >
+    Complex multi-step tasks requiring multiple specialists, tasks spanning
+    multiple domains (e.g. proposal writing AND compliance review AND capture
+    strategy), orchestration requests, strategic planning, any task that would
+    benefit from breaking down into sub-tasks handled by different specialist
+    agents, general consulting or advisory questions, or tasks where the user
+    wants a comprehensive multi-perspective analysis

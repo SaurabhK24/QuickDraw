@@ -4,11 +4,13 @@ import {
   Play,
   GitBranch,
   Package,
+  MessageSquare,
   Zap,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { to: "/", icon: LayoutDashboard, label: "Overview" },
+  { to: "/chat", icon: MessageSquare, label: "Swarm Chat" },
   { to: "/run", icon: Play, label: "New Run" },
   { to: "/workflows", icon: GitBranch, label: "Workflows" },
   { to: "/packs", icon: Package, label: "Packs" },

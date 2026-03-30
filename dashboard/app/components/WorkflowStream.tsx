@@ -1,4 +1,5 @@
 import { useSSE, type SSEEvent } from "~/lib/use-sse";
+import { Markdown } from "~/components/Markdown";
 import {
   CheckCircle2,
   Loader2,
@@ -70,9 +71,7 @@ export function WorkflowStream({ workflowId, sseUrl }: WorkflowStreamProps) {
           <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
             Response
           </h4>
-          <div className="prose prose-invert prose-sm max-w-none text-zinc-300 whitespace-pre-wrap">
-            {String(latestResult.data.response_text ?? "")}
-          </div>
+          <Markdown>{String(latestResult.data.response_text ?? "")}</Markdown>
           {latestResult.data.step_count != null && (
             <p className="text-xs text-zinc-500 mt-3 pt-3 border-t border-zinc-800">
               {String(latestResult.data.step_count)} steps completed

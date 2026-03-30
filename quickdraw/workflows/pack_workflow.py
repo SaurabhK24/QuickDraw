@@ -36,6 +36,9 @@ class WorkflowStepDef:
     requires_approval: bool = False
     model: str = "claude-sonnet-4-5-20250929"
     max_tokens: int = 4096
+    retry_if: str = ""
+    retry_step: int = -1
+    max_retries: int = 2
 
 
 @dataclass
@@ -82,19 +85,27 @@ class PackMultiStepWorkflow:
     @workflow.run
     async def run(self, input: PackWorkflowInput) -> PackWorkflowOutput:
         prev_output = input.user_text
+        retry_counts: dict[int, int] = {}
 
-        for i, step in enumerate(input.steps):
+        i = 0
+        while i < len(input.steps):
+            step = input.steps[i]
             prompt = step.prompt_template.format(
                 input=prev_output,
                 original_input=input.user_text,
                 step_index=i,
             )
 
-            session_key = f"{input.session_key}:{input.workflow_id}:step-{i}"
+            iteration = retry_counts.get(i, 0)
+            session_key = (
+                f"{input.session_key}:{input.workflow_id}:step-{i}"
+                + (f":retry-{iteration}" if iteration > 0 else "")
+            )
 
             workflow.logger.info(
-                "Step %d/%d: agent=%s.%s",
-                i + 1, len(input.steps), step.pack_id, step.agent_id,
+                "Step %d/%d (iter %d): agent=%s.%s",
+                i + 1, len(input.steps), iteration,
+                step.pack_id, step.agent_id,
             )
 
             result = await workflow.execute_activity(
@@ -108,7 +119,6 @@ class PackMultiStepWorkflow:
                     max_tokens=step.max_tokens or input.max_tokens,
                 ),
                 start_to_close_timeout=timedelta(minutes=5),
-                heartbeat_timeout=timedelta(seconds=60),
                 retry_policy=_RETRY,
             )
 
@@ -138,11 +148,28 @@ class PackMultiStepWorkflow:
 
             prev_output = result.response_text
 
+            if (
+                step.retry_if
+                and step.retry_if in result.response_text
+                and retry_counts.get(i, 0) < step.max_retries
+                and 0 <= step.retry_step < len(input.steps)
+            ):
+                retry_counts[i] = retry_counts.get(i, 0) + 1
+                workflow.logger.info(
+                    "Condition '%s' met at step %d — looping back to step %d (retry %d/%d)",
+                    step.retry_if, i, step.retry_step,
+                    retry_counts[i], step.max_retries,
+                )
+                i = step.retry_step
+                continue
+
+            i += 1
+
         self._status = "completed"
         return PackWorkflowOutput(
             final_response=prev_output,
             step_results=self._step_results,
-            total_steps=len(input.steps),
+            total_steps=len(self._step_results),
             status="completed",
         )
 

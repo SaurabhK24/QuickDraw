@@ -79,6 +79,34 @@ class RouterWorkflow:
             route.target, route.route_type, route.reasoning,
         )
 
+        # --- supervisor: autonomous orchestration via delegation tools ---
+        if route.route_type == "supervisor":
+            from quickdraw.workflows.supervisor_workflow import (
+                SupervisorWorkflow,
+                SupervisorInput,
+            )
+
+            sup_result = await workflow.execute_child_workflow(
+                SupervisorWorkflow.run,
+                SupervisorInput(
+                    tenant_id=input.tenant_id,
+                    session_key=input.session_key,
+                    user_text=input.user_text,
+                    agent_id=route.target,
+                    model=input.model,
+                    max_tokens=input.max_tokens,
+                ),
+            )
+
+            self._result = RouterOutput(
+                response_text=sup_result.response_text,
+                routed_to=route.target,
+                route_type="supervisor",
+                step_count=sup_result.step_count,
+            )
+            return self._result
+
+        # --- multi-step pack workflow ---
         if route.route_type == "workflow":
             wf_def = _find_workflow(route.target, input.available_workflows or [])
 
@@ -104,6 +132,9 @@ class RouterWorkflow:
                         requires_approval=s.get("requires_approval", False),
                         model=s.get("model", input.model),
                         max_tokens=s.get("max_tokens", input.max_tokens),
+                        retry_if=s.get("retry_if", ""),
+                        retry_step=s.get("retry_step", -1),
+                        max_retries=s.get("max_retries", 2),
                     )
                     for s in wf_def.get("steps", [])
                 ]
@@ -130,9 +161,7 @@ class RouterWorkflow:
                 )
                 return self._result
 
-        parts = route.target.split(".", 1)
-        agent_id = parts[-1] if len(parts) > 1 else route.target
-
+        # --- single agent turn ---
         result = await workflow.execute_activity(
             execute_agent_turn,
             AgentRunInput(
@@ -144,7 +173,6 @@ class RouterWorkflow:
                 max_tokens=input.max_tokens,
             ),
             start_to_close_timeout=timedelta(minutes=5),
-            heartbeat_timeout=timedelta(seconds=60),
             retry_policy=_RETRY,
         )
 

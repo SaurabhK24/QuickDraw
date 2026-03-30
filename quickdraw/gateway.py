@@ -10,9 +10,12 @@ The gateway is the single entry point. It:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import signal
+import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from quickdraw.channels.base import ChannelAdapter, ReplyFn
@@ -95,6 +98,8 @@ class Gateway:
             return ReplChannel(kind, settings)
         elif kind == "http":
             from quickdraw.channels.http_api import HttpApiChannel
+            settings["_sessions_dir"] = str(self.config.sessions_dir)
+            settings["_progress_dir"] = str(self.config.workspace / "progress")
             return HttpApiChannel(kind, settings)
         elif kind == "teams":
             from quickdraw.channels.teams_channel import TeamsChannel
@@ -142,6 +147,9 @@ class Gateway:
                             "pack_id": wf.pack_id,
                             "prompt_template": s.prompt_template,
                             "requires_approval": s.requires_approval,
+                            "retry_if": s.retry_if,
+                            "retry_step": s.retry_step,
+                            "max_retries": s.max_retries,
                         }
                         for s in wf.steps
                     ],
@@ -173,6 +181,8 @@ class Gateway:
         user_text: str,
         model: str = "claude-sonnet-4-5-20250929",
         max_tokens: int = 4096,
+        _delegation_depth: int = 0,
+        _workflow_key: str = "",
     ) -> dict:
         """Execute one agent turn and return the result.
 
@@ -180,6 +190,9 @@ class Gateway:
         used by both the HTTP channel's /run-turn endpoint (called by the
         Temporal worker) and the direct fallback path. The worker acts as a
         pure orchestrator; all LLM calls happen here in the gateway.
+
+        The ``_delegation_depth`` and ``_workflow_key`` params are used by the
+        swarm delegation system to track recursion depth and scope shared memory.
         """
         from quickdraw.core.loop import AgentLoop
         from quickdraw.core.session import SessionManager
@@ -187,7 +200,9 @@ class Gateway:
         from quickdraw.tools.registry import ToolRegistry
         from quickdraw.tools import filesystem, memory_tools, shell, web
 
-        # --- build a per-agent-turn registry with the right tool set ---
+        workflow_key = _workflow_key or session_key
+
+        # --- resolve agent config ---
         agent_tools: list[str] | None = None
         soul: str = f"You are {agent_id}, a helpful AI assistant."
 
@@ -201,10 +216,8 @@ class Gateway:
 
         tool_set = set(agent_tools) if agent_tools is not None else None
 
+        # --- build per-turn tool registry ---
         registry = ToolRegistry()
-
-        def _want(name: str) -> bool:
-            return tool_set is None or bool(tool_set & {name, *[name]})
 
         if tool_set is None or tool_set & {"shell", "run_command"}:
             shell.register(registry, self.permissions)
@@ -215,6 +228,39 @@ class Gateway:
         if tool_set is None or tool_set & {"web", "web_search"}:
             web.register(registry)
 
+        # --- swarm: delegation tools ---
+        _DELEGATION_TOOLS = {
+            "delegate_to_agent", "list_available_agents",
+            "delegate_parallel", "delegate",
+        }
+        if tool_set is None or tool_set & _DELEGATION_TOOLS:
+            from quickdraw.tools import delegate
+
+            progress_fn = self._make_progress_fn(workflow_key)
+            delegate.register(
+                registry,
+                run_turn_fn=self.run_turn,
+                available_agents=self._build_agent_catalog(exclude=agent_id),
+                workflow_key=workflow_key,
+                depth=_delegation_depth,
+                progress_fn=progress_fn,
+            )
+
+        # --- swarm: shared workflow memory ---
+        _SHARED_MEM_TOOLS = {
+            "shared_memory_write", "shared_memory_read",
+            "shared_memory_list", "shared_memory",
+        }
+        in_delegation = bool(_workflow_key) or _delegation_depth > 0
+        if in_delegation or tool_set is None or tool_set & _SHARED_MEM_TOOLS:
+            from quickdraw.tools import swarm_memory
+            swarm_memory.register(
+                registry,
+                memory_dir=self.config.memory_dir,
+                namespace=workflow_key,
+            )
+
+        # --- pack custom tools ---
         if "." in agent_id:
             pack_id = agent_id.split(".", 1)[0]
             pack = self._packs.get(pack_id)
@@ -244,6 +290,47 @@ class Gateway:
         sessions.save(session_key, messages)
 
         return {"response_text": response_text, "step_count": len(messages)}
+
+    def _make_progress_fn(self, workflow_key: str):
+        """Create a progress callback that writes events to a JSONL file."""
+        progress_dir = self.config.workspace / "progress"
+        safe_key = workflow_key.replace(":", "_").replace("/", "_")
+        path = progress_dir / f"{safe_key}.jsonl"
+
+        async def _write(event: dict) -> None:
+            event.setdefault("ts", time.time())
+            progress_dir.mkdir(parents=True, exist_ok=True)
+            with open(path, "a") as f:
+                f.write(json.dumps(event) + "\n")
+
+        return _write
+
+    def _build_agent_catalog(self, exclude: str = "") -> list[dict]:
+        """Build a catalog of all agents across loaded packs for delegation."""
+        catalog: list[dict] = []
+        for pack in self._packs.values():
+            for agent in pack.agents.values():
+                qid = agent.qualified_id
+                if qid == exclude:
+                    continue
+                soul_preview = ""
+                try:
+                    raw = agent.soul
+                    for line in raw.splitlines():
+                        stripped = line.strip()
+                        if stripped and not stripped.startswith("#"):
+                            soul_preview = stripped[:140]
+                            break
+                except Exception:
+                    pass
+                catalog.append({
+                    "id": qid,
+                    "name": agent.name,
+                    "pack": pack.name,
+                    "description": soul_preview,
+                    "tools": agent.tools,
+                })
+        return catalog
 
     async def _handle_direct(
         self, session_key: str, user_text: str, reply_fn: ReplyFn,

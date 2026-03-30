@@ -11,6 +11,9 @@ import (
 	"github.com/quickdraw/controlplane/internal/temporal"
 )
 
+// PythonBackend is the URL of the quickdraw-python gateway (set by main.go).
+var PythonBackend string
+
 func jsonResp(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -92,6 +95,7 @@ func CreateRun(w http.ResponseWriter, r *http.Request) {
 		jsonResp(w, http.StatusAccepted, map[string]any{
 			"workflow_id": workflowID,
 			"run_id":      runID,
+			"session_key": body.SessionKey,
 			"tenant":      tenant(r),
 			"status":      "running",
 			"mode":        "routed",
@@ -122,6 +126,7 @@ func CreateRun(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, http.StatusAccepted, map[string]any{
 		"workflow_id": workflowID,
 		"run_id":      runID,
+		"session_key": body.SessionKey,
 		"tenant":      tenant(r),
 		"status":      "running",
 		"mode":        "direct",
@@ -205,6 +210,7 @@ func ApprovalDecision(w http.ResponseWriter, r *http.Request) {
 
 var RegisteredAgents = []map[string]string{
 	{"id": "main", "name": "Jarvis"},
+	{"id": "core.supervisor", "name": "Supervisor"},
 }
 
 func ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -227,6 +233,60 @@ func CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Chat — convenience wrapper for multi-turn conversations
+// ---------------------------------------------------------------------------
+
+type chatSendRequest struct {
+	UserText   string `json:"user_text"`
+	SessionKey string `json:"session_key"`
+	Model      string `json:"model"`
+}
+
+func ChatSend(w http.ResponseWriter, r *http.Request) {
+	var body chatSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if body.UserText == "" {
+		jsonErr(w, http.StatusBadRequest, "user_text is required")
+		return
+	}
+	if body.SessionKey == "" {
+		body.SessionKey = fmt.Sprintf("chat:%s:%d", tenant(r), time.Now().UnixMilli())
+	}
+	if body.Model == "" {
+		body.Model = "claude-sonnet-4-5-20250929"
+	}
+
+	input := temporal.RouterInput{
+		TenantID:           tenant(r),
+		SessionKey:         body.SessionKey,
+		UserText:           body.UserText,
+		Model:              body.Model,
+		MaxTokens:          8192,
+		PackContext:        temporal.PackContext,
+		AvailableWorkflows: temporal.AvailableWorkflows,
+	}
+
+	workflowID, runID, err := temporal.StartRouterRun(r.Context(), input)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "failed to start chat run: "+err.Error())
+		return
+	}
+
+	jsonResp(w, http.StatusAccepted, map[string]any{
+		"workflow_id": workflowID,
+		"run_id":      runID,
+		"session_key": body.SessionKey,
+		"tenant":      tenant(r),
+		"status":      "running",
+		"mode":        "routed",
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Events (SSE)
 // ---------------------------------------------------------------------------
 
@@ -243,6 +303,7 @@ func EventStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workflowID := r.URL.Query().Get("workflow_id")
+	sessionKey := r.URL.Query().Get("session_key")
 
 	sendSSE(w, flusher, "connected", map[string]string{"tenant": tenant(r)})
 
@@ -253,12 +314,23 @@ func EventStream(w http.ResponseWriter, r *http.Request) {
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	lastProgressIdx := 0
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			// Poll delegation progress from the Python gateway
+			if sessionKey != "" && PythonBackend != "" {
+				newEvents, newIdx := fetchDelegationProgress(sessionKey, lastProgressIdx)
+				for _, evt := range newEvents {
+					sendSSE(w, flusher, "delegation", evt)
+				}
+				lastProgressIdx = newIdx
+			}
+
+			// Poll Temporal for workflow status
 			output, status, err := temporal.GetRunResult(r.Context(), workflowID)
 			if err != nil {
 				sendSSE(w, flusher, "error", map[string]string{"error": err.Error()})
@@ -287,6 +359,26 @@ func EventStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func fetchDelegationProgress(sessionKey string, since int) ([]map[string]any, int) {
+	if PythonBackend == "" {
+		return nil, since
+	}
+	url := fmt.Sprintf("%s/progress?key=%s&since=%d", PythonBackend, sessionKey, since)
+	resp, err := http.Get(url)
+	if err != nil || resp.StatusCode != 200 {
+		return nil, since
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, since
+	}
+	return data.Events, since + len(data.Events)
 }
 
 func sendSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) {

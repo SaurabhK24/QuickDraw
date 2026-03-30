@@ -13,6 +13,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 from temporalio import activity
@@ -122,43 +123,35 @@ async def resolve_workflow(workflow_target: str) -> dict | None:
     """Resolve a workflow definition from loaded packs by its qualified ID (e.g. 'sales.lead-qualification')."""
     packs = _get_packs()
 
+    def _serialize_wf(wf: Any) -> dict:
+        return {
+            "id": wf.id,
+            "qualified_id": wf.qualified_id,
+            "pack_id": wf.pack_id,
+            "steps": [
+                {
+                    "agent": s.agent,
+                    "pack_id": wf.pack_id,
+                    "prompt_template": s.prompt_template,
+                    "requires_approval": s.requires_approval,
+                    "retry_if": getattr(s, "retry_if", ""),
+                    "retry_step": getattr(s, "retry_step", -1),
+                    "max_retries": getattr(s, "max_retries", 2),
+                }
+                for s in wf.steps
+            ],
+        }
+
     parts = workflow_target.split(".", 1)
     if len(parts) == 2:
         pack_id, wf_id = parts
         if pack_id in packs and wf_id in packs[pack_id].workflows:
-            wf = packs[pack_id].workflows[wf_id]
-            return {
-                "id": wf.id,
-                "qualified_id": wf.qualified_id,
-                "pack_id": wf.pack_id,
-                "steps": [
-                    {
-                        "agent": s.agent,
-                        "pack_id": wf.pack_id,
-                        "prompt_template": s.prompt_template,
-                        "requires_approval": s.requires_approval,
-                    }
-                    for s in wf.steps
-                ],
-            }
+            return _serialize_wf(packs[pack_id].workflows[wf_id])
 
     for pack in packs.values():
         for wf in pack.workflows.values():
             if wf.id == workflow_target or wf.qualified_id == workflow_target:
-                return {
-                    "id": wf.id,
-                    "qualified_id": wf.qualified_id,
-                    "pack_id": wf.pack_id,
-                    "steps": [
-                        {
-                            "agent": s.agent,
-                            "pack_id": wf.pack_id,
-                            "prompt_template": s.prompt_template,
-                            "requires_approval": s.requires_approval,
-                        }
-                        for s in wf.steps
-                    ],
-                }
+                return _serialize_wf(wf)
 
     return None
 

@@ -20,6 +20,7 @@ from quickdraw.workflows.activities import execute_agent_turn, resolve_workflow,
 from quickdraw.workflows.durable_run import DurableRunWorkflow
 from quickdraw.workflows.pack_workflow import PackMultiStepWorkflow
 from quickdraw.workflows.router_workflow import RouterWorkflow
+from quickdraw.workflows.supervisor_workflow import SupervisorWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ async def run_worker() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[DurableRunWorkflow, PackMultiStepWorkflow, RouterWorkflow],
+        workflows=[DurableRunWorkflow, PackMultiStepWorkflow, RouterWorkflow, SupervisorWorkflow],
         activities=[execute_agent_turn, resolve_workflow, route_message],
     )
 
