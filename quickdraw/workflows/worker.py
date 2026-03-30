@@ -1,7 +1,7 @@
 """Temporal worker entry point.
 
 Starts a Temporal worker that listens on the quickdraw-runs task queue
-and executes agent activities.
+and executes all QuickDraw workflows and activities.
 
 Usage:
     python -m quickdraw.workflows.worker
@@ -16,8 +16,10 @@ import os
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from quickdraw.workflows.activities import execute_agent_turn
+from quickdraw.workflows.activities import execute_agent_turn, resolve_workflow, route_message
 from quickdraw.workflows.durable_run import DurableRunWorkflow
+from quickdraw.workflows.pack_workflow import PackMultiStepWorkflow
+from quickdraw.workflows.router_workflow import RouterWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +35,8 @@ async def run_worker() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[DurableRunWorkflow],
-        activities=[execute_agent_turn],
+        workflows=[DurableRunWorkflow, PackMultiStepWorkflow, RouterWorkflow],
+        activities=[execute_agent_turn, resolve_workflow, route_message],
     )
 
     logger.info("Temporal worker started on queue=%s", TASK_QUEUE)

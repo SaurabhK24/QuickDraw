@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from quickdraw.workflows.activities import (
@@ -57,6 +58,14 @@ class DurableRunWorkflow:
                 max_tokens=input.max_tokens,
             ),
             start_to_close_timeout=timedelta(minutes=5),
+            heartbeat_timeout=timedelta(seconds=60),
+            retry_policy=RetryPolicy(
+                initial_interval=timedelta(seconds=2),
+                backoff_coefficient=2.0,
+                maximum_interval=timedelta(seconds=30),
+                maximum_attempts=3,
+                non_retryable_error_types=["ValueError", "PermissionError"],
+            ),
         )
 
         self._result = result

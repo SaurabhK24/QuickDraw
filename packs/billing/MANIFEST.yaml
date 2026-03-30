@@ -1,0 +1,70 @@
+id: billing
+name: Billing & Finance Pack
+description: Invoice processing, collections, expense management, financial analysis, and accounts receivable.
+version: "1.0"
+
+agents:
+  invoice-processor:
+    name: Invoice Processor
+    soul: souls/processor.md
+    tools: [filesystem, memory, shell]
+    model: null
+
+  collections-agent:
+    name: Collections Specialist
+    soul: souls/collections.md
+    tools: [filesystem, memory, web_search]
+    model: null
+
+  finance-analyst:
+    name: Finance Analyst
+    soul: souls/analyst.md
+    tools: [filesystem, memory, web_search, shell]
+    model: null
+
+workflows:
+  invoice-processing:
+    name: Invoice Processing Pipeline
+    trigger: "user has an invoice to process, needs to extract invoice data, or wants to validate billing"
+    steps:
+      - agent: invoice-processor
+        prompt_template: |
+          Process this invoice information. Extract all key fields: vendor name, invoice number,
+          date, due date, line items, subtotal, tax, total, payment terms, and PO number if present.
+          Validate the math (line items should sum to subtotal, tax calculation should be correct).
+          Flag any discrepancies or unusual items.
+          
+          Invoice Data: {input}
+      - agent: finance-analyst
+        prompt_template: |
+          Review this processed invoice for financial compliance and approval routing.
+          Check: spend category, budget alignment, approval thresholds, duplicate detection guidance,
+          and recommended GL coding.
+          
+          Processed Invoice:
+          {input}
+          
+          Provide: approval recommendation (auto-approve/needs-review/flag), reason, and GL coding suggestion.
+        requires_approval: true
+
+  collections-workflow:
+    name: Collections Outreach
+    trigger: "user needs to follow up on overdue payments, past-due invoices, or accounts receivable"
+    steps:
+      - agent: finance-analyst
+        prompt_template: |
+          Analyze this accounts receivable situation. Determine: days past due, total outstanding,
+          payment history patterns, and risk assessment.
+          
+          AR Information: {input}
+      - agent: collections-agent
+        prompt_template: |
+          Based on this AR analysis, draft appropriate collections communications.
+          Match tone to severity: friendly reminder (1-30 days), firm follow-up (31-60 days),
+          or escalation notice (60+ days). Include specific amounts and invoice references.
+          
+          AR Analysis:
+          {input}
+
+router:
+  description: "Billing and finance tasks: invoice processing, collections, expense reports, financial analysis, accounts receivable/payable, budgeting, GL coding"

@@ -45,9 +45,12 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       MS_APP_ID: ${MS_APP_ID:-}
       MS_APP_PASSWORD: ${MS_APP_PASSWORD:-}
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
     ports:
       - "5050:5000"
       - "3978:3978"
+    volumes:
+      - ./packs:/app/.quickdraw/packs:ro
     command:
       - /bin/sh
       - -c
@@ -62,11 +65,14 @@ services:
                 'enabled': True,
                 'app_id': os.environ['MS_APP_ID'],
                 'app_password': os.environ.get('MS_APP_PASSWORD', ''),
+                'app_type': 'SingleTenant',
+                'tenant_id': os.environ.get('MS_TENANT_ID', ''),
                 'port': 3978,
                 'host': '0.0.0.0',
             }
         cfg = {
           'workspace': '/app/.quickdraw',
+          'temporal_address': 'temporal:7233',
           'llm': {'provider': 'anthropic', 'model': 'claude-sonnet-4-5-20250929', 'max_tokens': 4096},
           'agents': {'main': {'name': 'Jarvis', 'soul': 'SOUL.md'}},
           'channels': channels,
@@ -74,7 +80,12 @@ services:
         }
         yaml.dump(cfg, open('/tmp/config.yaml', 'w'))
         "
+        until python -c "import socket; s=socket.create_connection(('temporal',7233),2); s.close()" 2>/dev/null; do
+          sleep 3
+        done
         exec python -m quickdraw run --config /tmp/config.yaml
+    depends_on:
+      - temporal
 
   quickdraw-worker:
     build:
@@ -83,6 +94,8 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       TEMPORAL_ADDRESS: temporal:7233
+    volumes:
+      - ./packs:/app/.quickdraw/packs:ro
     command:
       - /bin/sh
       - -c

@@ -1,0 +1,61 @@
+id: executive-assistant
+name: Executive Assistant Pack
+description: Task management, research briefings, meeting prep, email drafting, and executive support.
+version: "1.0"
+
+agents:
+  ea:
+    name: Executive Assistant
+    soul: souls/ea.md
+    tools: [web_search, filesystem, memory, shell]
+    model: null
+
+  researcher:
+    name: Research Specialist
+    soul: souls/researcher.md
+    tools: [web_search, filesystem, memory]
+    model: null
+
+workflows:
+  meeting-prep:
+    name: Meeting Preparation
+    trigger: "user needs to prepare for a meeting, needs a briefing document, or wants background research on attendees"
+    steps:
+      - agent: researcher
+        prompt_template: |
+          Research and prepare comprehensive background information for this meeting/topic.
+          Include: attendee backgrounds, company information, recent news, relevant industry context,
+          and any potential talking points or areas of concern.
+          
+          Meeting/Topic: {input}
+      - agent: ea
+        prompt_template: |
+          Based on this research, create a concise executive briefing document.
+          Format it for quick consumption (5-minute read max).
+          Include: Key Points, Attendee Quick-Reference, Suggested Talking Points,
+          Potential Questions to Expect, and Recommended Outcomes/Ask.
+          
+          Research:
+          {input}
+
+  research-brief:
+    name: Research Brief
+    trigger: "user needs deep research on a topic, company, person, industry, or trend"
+    steps:
+      - agent: researcher
+        prompt_template: |
+          Conduct thorough research on this topic. Use web search to find current information.
+          Provide a comprehensive, well-sourced brief.
+          
+          Research Request: {input}
+      - agent: ea
+        prompt_template: |
+          Distill this research into an executive summary with clear action items.
+          The summary should be: (1) scannable in 2 minutes, (2) highlight what matters and why,
+          (3) include specific recommendations.
+          
+          Full Research:
+          {input}
+
+router:
+  description: "Executive support tasks: meeting preparation, research briefings, email drafting, task management, scheduling help, travel planning, document preparation"

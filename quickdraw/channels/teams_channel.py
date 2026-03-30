@@ -28,7 +28,7 @@ from botbuilder.integration.aiohttp import (
     CloudAdapter,
     ConfigurationBotFrameworkAuthentication,
 )
-from botbuilder.schema import Activity, ActivityTypes
+from botbuilder.schema import Activity, ActivityTypes, ConversationReference
 
 from quickdraw.channels.base import ChannelAdapter
 
@@ -56,11 +56,12 @@ def _chunk_message(text: str, limit: int = TEAMS_MAX_LENGTH) -> list[str]:
 class _BotConfig:
     """Minimal config object that ConfigurationBotFrameworkAuthentication reads."""
 
-    def __init__(self, app_id: str, app_password: str) -> None:
+    def __init__(self, app_id: str, app_password: str, app_type: str = "MultiTenant",
+                 tenant_id: str = "") -> None:
         self.APP_ID = app_id
         self.APP_PASSWORD = app_password
-        self.APP_TYPE = "SingleTenant"
-        self.APP_TENANTID = ""
+        self.APP_TYPE = app_type
+        self.APP_TENANTID = tenant_id
 
 
 class TeamsChannel(ChannelAdapter):
@@ -73,7 +74,10 @@ class TeamsChannel(ChannelAdapter):
         self._port = settings.get("port", 3978)
         self._host = settings.get("host", "0.0.0.0")
 
-        config = _BotConfig(self._app_id, self._app_password)
+        app_type = settings.get("app_type", "MultiTenant")
+        tenant_id = settings.get("tenant_id", "")
+
+        config = _BotConfig(self._app_id, self._app_password, app_type, tenant_id)
         self._adapter = CloudAdapter(ConfigurationBotFrameworkAuthentication(config))
         self._adapter.on_turn_error = self._on_error
 
@@ -81,6 +85,8 @@ class TeamsChannel(ChannelAdapter):
         self._app.router.add_post("/api/messages", self._handle_incoming)
         self._app.router.add_get("/api/health", self._handle_health)
         self._runner: web.AppRunner | None = None
+
+        self._conversation_refs: dict[str, ConversationReference] = {}
 
     async def start(self) -> None:
         if not self._app_id or not self._app_password:
@@ -105,22 +111,40 @@ class TeamsChannel(ChannelAdapter):
     async def _handle_health(self, request: web.Request) -> web.Response:
         return web.json_response({"status": "ok", "channel": "teams"})
 
+    # ------------------------------------------------------------------
+    # Bot Framework activity handlers
+    # ------------------------------------------------------------------
+
+    async def on_turn(self, turn_context: TurnContext) -> None:
+        """Main dispatch — route by activity type."""
+        if turn_context.activity.type == ActivityTypes.message:
+            await self.on_message_activity(turn_context)
+        elif turn_context.activity.type == ActivityTypes.conversation_update:
+            if turn_context.activity.members_added:
+                await self.on_members_added_activity(
+                    turn_context.activity.members_added, turn_context
+                )
+
     async def on_message_activity(self, turn_context: TurnContext) -> None:
-        """Called by the Bot Framework adapter when a message arrives."""
         activity = turn_context.activity
 
         if not activity.text:
             return
 
+        self._store_conversation_ref(activity)
+
         text = self._strip_mention(activity)
         session_key = self._make_session_key(activity)
+
+        # Show typing indicator while the agent thinks
+        await turn_context.send_activity(Activity(type=ActivityTypes.typing))
 
         response_event = asyncio.Event()
         response_text = ""
 
-        async def reply_fn(text: str) -> None:
+        async def reply_fn(reply: str) -> None:
             nonlocal response_text
-            response_text = text
+            response_text = reply
             response_event.set()
 
         await self._dispatch(session_key, text, reply_fn)
@@ -133,18 +157,33 @@ class TeamsChannel(ChannelAdapter):
         for member in members_added:
             if member.id != turn_context.activity.recipient.id:
                 await turn_context.send_activity(
-                    "Hello! I'm Jarvis, your AI assistant. Send me a message to get started."
+                    "Hello! I'm your AI assistant. Send me a message to get started."
                 )
 
-    async def on_turn(self, turn_context: TurnContext) -> None:
-        """Main dispatch — route by activity type."""
-        if turn_context.activity.type == ActivityTypes.message:
-            await self.on_message_activity(turn_context)
-        elif turn_context.activity.type == ActivityTypes.conversation_update:
-            if turn_context.activity.members_added:
-                await self.on_members_added_activity(
-                    turn_context.activity.members_added, turn_context
-                )
+    # ------------------------------------------------------------------
+    # Proactive messaging support
+    # ------------------------------------------------------------------
+
+    def _store_conversation_ref(self, activity: Activity) -> None:
+        ref = TurnContext.get_conversation_reference(activity)
+        key = self._make_session_key(activity)
+        self._conversation_refs[key] = ref
+
+    async def send_proactive(self, session_key: str, message: str) -> None:
+        """Send a message to a conversation without a user prompt (approvals, notifications)."""
+        ref = self._conversation_refs.get(session_key)
+        if not ref:
+            logger.warning("No conversation reference for session %s", session_key)
+            return
+        await self._adapter.continue_conversation(
+            ref,
+            lambda ctx: ctx.send_activity(message),
+            self._app_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _make_session_key(self, activity: Activity) -> str:
         conv_id = activity.conversation.id if activity.conversation else "unknown"
@@ -169,4 +208,7 @@ class TeamsChannel(ChannelAdapter):
     @staticmethod
     async def _on_error(context: TurnContext, error: Exception) -> None:
         logger.error("Teams bot turn error: %s", error, exc_info=True)
-        await context.send_activity("Something went wrong. Please try again.")
+        try:
+            await context.send_activity("Something went wrong. Please try again.")
+        except Exception:
+            logger.error("Failed to send error message to Teams", exc_info=True)

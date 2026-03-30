@@ -3,9 +3,8 @@
 The gateway is the single entry point. It:
   1. Loads configuration
   2. Instantiates enabled channels
-  3. Sets up the agent loop, tools, sessions, and queue
-  4. Routes inbound messages from any channel through the agent
-  5. Dual-writes run and audit records to Postgres when the platform DB is configured
+  3. Discovers packs (vertical agent configurations)
+  4. Routes inbound messages through Temporal (durable) or AgentLoop (fallback)
 """
 
 from __future__ import annotations
@@ -58,6 +57,10 @@ class Gateway:
         self._heartbeat: Any = None
         self._compactor: Any = None
 
+        self._packs: dict = {}
+        self._pack_context: str = ""
+        self._available_workflows: list[dict] = []
+
     def _register_tools(self) -> None:
         """Register all built-in tools."""
         from quickdraw.tools import filesystem, memory_tools, shell, web
@@ -102,7 +105,70 @@ class Gateway:
     async def _handle_message(
         self, session_key: str, user_text: str, reply_fn: ReplyFn,
     ) -> None:
-        """Process an inbound message from any channel."""
+        """Process an inbound message from any channel.
+
+        If Temporal is connected, routes through the durable RouterWorkflow.
+        Otherwise falls back to direct AgentLoop execution.
+        """
+        global _temporal_client
+
+        if _temporal_client is not None:
+            try:
+                response_text = await self._handle_via_temporal(session_key, user_text)
+                await reply_fn(response_text)
+                return
+            except Exception:
+                logger.warning("Temporal execution failed, falling back to direct", exc_info=True)
+
+        await self._handle_direct(session_key, user_text, reply_fn)
+
+    async def _handle_via_temporal(self, session_key: str, user_text: str) -> str:
+        """Submit message through Temporal RouterWorkflow for durable execution."""
+        from quickdraw.workflows.router_workflow import RouterWorkflow, RouterInput
+
+        workflow_id = f"channel-{session_key}-{uuid.uuid4().hex[:8]}"
+
+        wf_defs = []
+        for pack in self._packs.values():
+            for wf in pack.workflows.values():
+                wf_defs.append({
+                    "id": wf.id,
+                    "qualified_id": wf.qualified_id,
+                    "pack_id": wf.pack_id,
+                    "steps": [
+                        {
+                            "agent": s.agent,
+                            "pack_id": wf.pack_id,
+                            "prompt_template": s.prompt_template,
+                            "requires_approval": s.requires_approval,
+                        }
+                        for s in wf.steps
+                    ],
+                })
+
+        handle = await _temporal_client.start_workflow(
+            RouterWorkflow.run,
+            RouterInput(
+                tenant_id=str(_default_tenant_id or "default"),
+                session_key=session_key,
+                user_text=user_text,
+                model=self.config.llm.model,
+                max_tokens=self.config.llm.max_tokens,
+                pack_context=self._pack_context,
+                available_workflows=wf_defs,
+            ),
+            id=workflow_id,
+            task_queue="quickdraw-runs",
+        )
+
+        logger.info("Submitted to Temporal: workflow_id=%s", workflow_id)
+        result = await handle.result()
+        return result.response_text
+
+    async def _handle_direct(
+        self, session_key: str, user_text: str, reply_fn: ReplyFn,
+    ) -> None:
+        """Fallback: run directly through AgentLoop without Temporal."""
         from quickdraw.router import AgentRouter
 
         if self._router is None:
@@ -228,6 +294,8 @@ class Gateway:
                 logger.warning("Temporal connection failed", exc_info=True)
                 _temporal_client = None
 
+        self._load_packs()
+
         if self.config.heartbeats:
             from quickdraw.heartbeat import HeartbeatScheduler
             self._heartbeat = HeartbeatScheduler(self.config, self)
@@ -247,6 +315,29 @@ class Gateway:
                 logger.info("Channel started: %s", ch.channel_id)
             except Exception as e:
                 logger.error("Failed to start channel %s: %s", ch.channel_id, e)
+
+    def _load_packs(self) -> None:
+        """Discover and load all agent packs."""
+        from quickdraw.packs.loader import discover_packs, build_router_context
+
+        packs_dir = self.config.workspace / "packs"
+        self._packs = discover_packs(packs_dir)
+
+        if self._packs:
+            self._pack_context = build_router_context(self._packs)
+            logger.info("Loaded %d packs: %s", len(self._packs), list(self._packs.keys()))
+
+            self._available_workflows = []
+            for pack in self._packs.values():
+                for wf in pack.workflows.values():
+                    self._available_workflows.append({
+                        "id": wf.id,
+                        "qualified_id": wf.qualified_id,
+                        "pack_id": wf.pack_id,
+                        "name": wf.name,
+                    })
+        else:
+            logger.info("No packs found at %s — using default agent only", packs_dir)
 
     async def stop(self) -> None:
         """Gracefully shut down all channels and services."""

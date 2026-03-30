@@ -75,17 +75,52 @@ func GetRunResult(ctx context.Context, workflowID string) (*AgentRunOutput, stri
 	}
 	status := desc.WorkflowExecutionInfo.Status.String()
 
-	// Only try to get result if the workflow completed
-	if status == "Completed" {
+	switch status {
+	case "Completed", "WORKFLOW_EXECUTION_STATUS_COMPLETED":
 		run := Client.GetWorkflow(ctx, workflowID, "")
 		var output AgentRunOutput
 		if err := run.Get(ctx, &output); err != nil {
 			return nil, status, fmt.Errorf("get result: %w", err)
 		}
-		return &output, status, nil
-	}
+		return &output, "completed", nil
 
-	return nil, status, nil
+	case "Running", "WORKFLOW_EXECUTION_STATUS_RUNNING":
+		result, err := QueryRunResult(ctx, workflowID)
+		if err != nil {
+			return nil, "running", nil
+		}
+		return result, "running", nil
+
+	case "Failed", "WORKFLOW_EXECUTION_STATUS_FAILED":
+		return nil, "failed", nil
+
+	case "Canceled", "Cancelled", "WORKFLOW_EXECUTION_STATUS_CANCELED":
+		return nil, "cancelled", nil
+
+	case "Terminated", "WORKFLOW_EXECUTION_STATUS_TERMINATED":
+		return nil, "terminated", nil
+
+	case "TimedOut", "WORKFLOW_EXECUTION_STATUS_TIMED_OUT":
+		return nil, "timed_out", nil
+
+	default:
+		return nil, status, nil
+	}
+}
+
+func QueryRunResult(ctx context.Context, workflowID string) (*AgentRunOutput, error) {
+	resp, err := Client.QueryWorkflow(ctx, workflowID, "", "get_result")
+	if err != nil {
+		return nil, fmt.Errorf("query workflow: %w", err)
+	}
+	var output AgentRunOutput
+	if err := resp.Get(&output); err != nil {
+		return nil, fmt.Errorf("decode query result: %w", err)
+	}
+	if output.ResponseText == "" {
+		return nil, nil
+	}
+	return &output, nil
 }
 
 func CancelRun(ctx context.Context, workflowID string) error {
@@ -95,3 +130,37 @@ func CancelRun(ctx context.Context, workflowID string) error {
 func SignalApproval(ctx context.Context, workflowID string, approved bool) error {
 	return Client.SignalWorkflow(ctx, workflowID, "", "approve", approved)
 }
+
+// RouterInput matches the Python RouterInput dataclass.
+type RouterInput struct {
+	TenantID           string                   `json:"tenant_id"`
+	SessionKey         string                   `json:"session_key"`
+	UserText           string                   `json:"user_text"`
+	Model              string                   `json:"model"`
+	MaxTokens          int                      `json:"max_tokens"`
+	PackContext        string                   `json:"pack_context"`
+	AvailableWorkflows []map[string]interface{} `json:"available_workflows"`
+}
+
+// RouterOutput matches the Python RouterOutput dataclass.
+type RouterOutput struct {
+	ResponseText string `json:"response_text"`
+	RoutedTo     string `json:"routed_to"`
+	RouteType    string `json:"route_type"`
+	StepCount    int    `json:"step_count"`
+}
+
+func StartRouterRun(ctx context.Context, input RouterInput) (string, string, error) {
+	opts := client.StartWorkflowOptions{
+		TaskQueue: TaskQueue,
+	}
+	run, err := Client.ExecuteWorkflow(ctx, opts, "RouterWorkflow", input)
+	if err != nil {
+		return "", "", fmt.Errorf("start router workflow: %w", err)
+	}
+	return run.GetID(), run.GetRunID(), nil
+}
+
+// PackContext is set at startup by the main function and passed to router runs.
+var PackContext string
+var AvailableWorkflows []map[string]interface{}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,6 +20,16 @@ import (
 func main() {
 	port := envOr("PORT", "8080")
 	pythonBackend := envOr("PYTHON_BACKEND", "http://127.0.0.1:5000")
+
+	if agentsJSON := os.Getenv("AGENTS_CONFIG"); agentsJSON != "" {
+		var agents []map[string]string
+		if err := json.Unmarshal([]byte(agentsJSON), &agents); err != nil {
+			log.Printf("AGENTS_CONFIG parse error (using default): %v", err)
+		} else {
+			handlers.RegisteredAgents = agents
+			log.Printf("Loaded %d agents from AGENTS_CONFIG", len(agents))
+		}
+	}
 
 	if err := temporal.Connect(); err != nil {
 		log.Fatalf("Temporal: %v", err)

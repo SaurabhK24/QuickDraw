@@ -47,6 +47,7 @@ type createRunRequest struct {
 	Model            string `json:"model"`
 	MaxTokens        int    `json:"max_tokens"`
 	RequiresApproval bool   `json:"requires_approval"`
+	Mode             string `json:"mode"`
 }
 
 func CreateRun(w http.ResponseWriter, r *http.Request) {
@@ -60,9 +61,6 @@ func CreateRun(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "user_text is required")
 		return
 	}
-	if body.AgentID == "" {
-		body.AgentID = "main"
-	}
 	if body.SessionKey == "" {
 		body.SessionKey = "api:" + tenant(r)
 	}
@@ -71,6 +69,37 @@ func CreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.MaxTokens == 0 {
 		body.MaxTokens = 4096
+	}
+
+	if body.Mode == "routed" || (body.Mode == "" && body.AgentID == "") {
+		input := temporal.RouterInput{
+			TenantID:           tenant(r),
+			SessionKey:         body.SessionKey,
+			UserText:           body.UserText,
+			Model:              body.Model,
+			MaxTokens:          body.MaxTokens,
+			PackContext:        temporal.PackContext,
+			AvailableWorkflows: temporal.AvailableWorkflows,
+		}
+
+		workflowID, runID, err := temporal.StartRouterRun(r.Context(), input)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "failed to start routed run: "+err.Error())
+			return
+		}
+
+		jsonResp(w, http.StatusAccepted, map[string]any{
+			"workflow_id": workflowID,
+			"run_id":      runID,
+			"tenant":      tenant(r),
+			"status":      "running",
+			"mode":        "routed",
+		})
+		return
+	}
+
+	if body.AgentID == "" {
+		body.AgentID = "main"
 	}
 
 	input := temporal.DurableRunInput{
@@ -94,6 +123,7 @@ func CreateRun(w http.ResponseWriter, r *http.Request) {
 		"run_id":      runID,
 		"tenant":      tenant(r),
 		"status":      "running",
+		"mode":        "direct",
 	})
 }
 
@@ -114,6 +144,12 @@ func GetRun(w http.ResponseWriter, r *http.Request) {
 	if output != nil {
 		resp["response_text"] = output.ResponseText
 		resp["step_count"] = output.StepCount
+		resp["run_id"] = output.RunID
+	}
+
+	// If still running and query returned partial result, mark it
+	if status == "running" && output != nil {
+		resp["partial"] = true
 	}
 
 	jsonResp(w, http.StatusOK, resp)
@@ -166,11 +202,13 @@ func ApprovalDecision(w http.ResponseWriter, r *http.Request) {
 // Agents — read from config (no DB yet)
 // ---------------------------------------------------------------------------
 
+var RegisteredAgents = []map[string]string{
+	{"id": "main", "name": "Jarvis"},
+}
+
 func ListAgents(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, http.StatusOK, map[string]any{
-		"agents": []map[string]string{
-			{"id": "main", "name": "Jarvis"},
-		},
+		"agents": RegisteredAgents,
 		"tenant": tenant(r),
 	})
 }

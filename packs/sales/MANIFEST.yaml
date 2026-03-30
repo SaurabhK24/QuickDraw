@@ -1,0 +1,66 @@
+id: sales
+name: Sales Pack
+description: End-to-end sales automation — lead qualification, outreach, pipeline tracking, deal analysis.
+version: "1.0"
+
+agents:
+  sales-rep:
+    name: Sales Rep
+    soul: souls/rep.md
+    tools: [web_search, filesystem, memory, shell]
+    model: null
+
+  sales-analyst:
+    name: Sales Analyst
+    soul: souls/analyst.md
+    tools: [web_search, filesystem, memory]
+    model: null
+
+workflows:
+  lead-qualification:
+    name: Lead Qualification Pipeline
+    trigger: "user wants to qualify a lead, research a prospect, or assess a business opportunity"
+    steps:
+      - agent: sales-rep
+        prompt_template: |
+          Research and qualify this lead/prospect. Gather all available information about the company, 
+          key decision makers, recent news, funding, tech stack, and any signals of buying intent.
+          
+          Lead/Request: {input}
+          
+          Provide a structured research brief with: Company Overview, Key Contacts, Recent Activity, 
+          Tech Stack (if available), Potential Pain Points, and recommended approach.
+      - agent: sales-analyst
+        prompt_template: |
+          Based on this research brief, provide a lead score (1-100) and detailed analysis.
+          Consider: company size, industry fit, timing signals, budget indicators, and competition.
+          
+          Research Brief:
+          {input}
+          
+          Output: Lead Score, Confidence Level, Key Risks, Recommended Next Steps, and a 
+          one-paragraph executive summary suitable for a sales standup.
+        requires_approval: false
+      - agent: sales-rep
+        prompt_template: |
+          Based on this lead analysis, draft a personalized outreach sequence.
+          Create: (1) a LinkedIn connection request message, (2) a cold email, and 
+          (3) a follow-up email for 3 days later. Make them highly personalized based on the research.
+          
+          Lead Analysis:
+          {input}
+
+  deal-review:
+    name: Deal Review
+    trigger: "user wants to review a deal, analyze a proposal, or assess deal health"
+    steps:
+      - agent: sales-analyst
+        prompt_template: |
+          Analyze this deal and provide a comprehensive health assessment.
+          Evaluate: deal stage accuracy, risk factors, competitive positioning, 
+          champion strength, and probability of close.
+          
+          Deal Information: {input}
+
+router:
+  description: "Sales-related tasks: lead qualification, prospecting, outreach drafting, deal reviews, pipeline analysis, CRM tasks, competitive analysis"
