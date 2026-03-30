@@ -22,11 +22,16 @@ pip install -e .
 # For Discord support
 pip install -e '.[discord]'
 
+# For multi-provider LLM support (OpenAI + Gemini adapters)
+pip install -e '.[llm]'
+
 # Initialize workspace
 quickdraw init
 
-# Set your API key
+# Set API keys (use whichever providers you configure)
 export ANTHROPIC_API_KEY=sk-...
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=...
 
 # Run
 quickdraw run
@@ -55,9 +60,17 @@ Copy `config.example.yaml` to `~/.quickdraw/config.yaml`:
 workspace: ~/.quickdraw
 
 llm:
-  provider: anthropic
-  model: claude-sonnet-4-5-20250929
+  # Ordered provider failover (tries top -> bottom)
   max_tokens: 4096
+  providers:
+    - provider: anthropic
+      model: claude-sonnet-4-5-20250929
+    - provider: openai
+      model: gpt-4o-mini
+      api_key: ${OPENAI_API_KEY}
+    - provider: gemini
+      model: gemini-2.0-flash
+      api_key: ${GEMINI_API_KEY}
 
 agents:
   main:
@@ -83,6 +96,21 @@ permissions:
   safe_commands: [ls, cat, date, pwd, git, python]
 ```
 
+You can also keep legacy single-provider config:
+
+```yaml
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-5-20250929
+  max_tokens: 4096
+```
+
+### Provider Notes
+
+- Anthropic currently supports full tool-use in the agent loop.
+- OpenAI and Gemini currently run as text-only fallback providers (no tool calls yet).
+- If Anthropic is rate-limited/down, QuickDraw can still reply through fallback providers.
+
 ## Key Concepts
 
 **SOUL.md** — A markdown file defining the agent's personality, injected as the system prompt on every LLM call. Edit `~/.quickdraw/SOUL.md` to customize.
@@ -104,6 +132,12 @@ quickdraw/
 ├── gateway.py           # Central orchestrator
 ├── router.py            # Multi-agent message routing
 ├── heartbeat.py         # Cron-based scheduled tasks
+├── llm/
+│   ├── base.py          # Common LLM interface
+│   ├── router.py        # Provider failover router
+│   ├── anthropic_client.py
+│   ├── openai_client.py
+│   └── gemini_client.py
 ├── core/
 │   ├── session.py       # JSONL session persistence
 │   ├── loop.py          # Agent loop (LLM + tool cycle)
@@ -121,7 +155,8 @@ quickdraw/
     ├── base.py          # Abstract channel interface
     ├── discord_channel.py
     ├── repl.py
-    └── http_api.py
+    ├── http_api.py
+    └── signal_channel.py
 ```
 
 ## License

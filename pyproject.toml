@@ -18,8 +18,14 @@ dependencies = [
 
 [project.optional-dependencies]
 discord = ["discord.py"]
+llm = [
+    "openai",
+    "google-genai",
+]
 all = [
     "discord.py",
+    "openai",
+    "google-genai",
 ]
 dev = [
     "pytest",
