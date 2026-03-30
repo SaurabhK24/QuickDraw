@@ -81,6 +81,7 @@ class Gateway:
             adapter = self._make_adapter(ch_id, ch_cfg.settings)
             if adapter:
                 adapter.set_message_callback(self._handle_message)
+                adapter.set_run_turn_callback(self.run_turn)
                 adapters.append(adapter)
 
         return adapters
@@ -164,6 +165,85 @@ class Gateway:
         logger.info("Submitted to Temporal: workflow_id=%s", workflow_id)
         result = await handle.result()
         return result.response_text
+
+    async def run_turn(
+        self,
+        agent_id: str,
+        session_key: str,
+        user_text: str,
+        model: str = "claude-sonnet-4-5-20250929",
+        max_tokens: int = 4096,
+    ) -> dict:
+        """Execute one agent turn and return the result.
+
+        This is the single authoritative execution path for all agent runs —
+        used by both the HTTP channel's /run-turn endpoint (called by the
+        Temporal worker) and the direct fallback path. The worker acts as a
+        pure orchestrator; all LLM calls happen here in the gateway.
+        """
+        from quickdraw.core.loop import AgentLoop
+        from quickdraw.core.session import SessionManager
+        from quickdraw.packs.loader import load_custom_tools
+        from quickdraw.tools.registry import ToolRegistry
+        from quickdraw.tools import filesystem, memory_tools, shell, web
+
+        # --- build a per-agent-turn registry with the right tool set ---
+        agent_tools: list[str] | None = None
+        soul: str = f"You are {agent_id}, a helpful AI assistant."
+
+        if "." in agent_id:
+            pack_id, local_id = agent_id.split(".", 1)
+            pack = self._packs.get(pack_id)
+            if pack and local_id in pack.agents:
+                pa = pack.agents[local_id]
+                agent_tools = pa.tools
+                soul = pa.soul
+
+        tool_set = set(agent_tools) if agent_tools is not None else None
+
+        registry = ToolRegistry()
+
+        def _want(name: str) -> bool:
+            return tool_set is None or bool(tool_set & {name, *[name]})
+
+        if tool_set is None or tool_set & {"shell", "run_command"}:
+            shell.register(registry, self.permissions)
+        if tool_set is None or tool_set & {"filesystem", "read_file", "write_file", "list_directory"}:
+            filesystem.register(registry)
+        if tool_set is None or tool_set & {"memory", "memory_read", "memory_write", "memory_search"}:
+            memory_tools.register(registry, self.config.memory_dir)
+        if tool_set is None or tool_set & {"web", "web_search"}:
+            web.register(registry)
+
+        if "." in agent_id:
+            pack_id = agent_id.split(".", 1)[0]
+            pack = self._packs.get(pack_id)
+            if pack:
+                for tool_def in load_custom_tools(pack):
+                    if tool_set is None or tool_def["name"] in tool_set:
+                        registry.register(
+                            name=tool_def["name"],
+                            description=tool_def["description"],
+                            input_schema=tool_def["input_schema"],
+                            handler=tool_def["handler"],
+                        )
+
+        # --- run the agent turn ---
+        loop = AgentLoop(registry)
+        sessions = SessionManager(self.config.sessions_dir)
+        messages = sessions.load(session_key)
+        messages.append({"role": "user", "content": user_text})
+
+        response_text, messages = await loop.run(
+            messages=messages,
+            system_prompt=soul,
+            model=model,
+            max_tokens=max_tokens,
+        )
+
+        sessions.save(session_key, messages)
+
+        return {"response_text": response_text, "step_count": len(messages)}
 
     async def _handle_direct(
         self, session_key: str, user_text: str, reply_fn: ReplyFn,

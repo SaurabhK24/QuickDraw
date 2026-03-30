@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -132,6 +133,89 @@ def load_pack(pack_dir: Path) -> Pack | None:
         router_hint=raw.get("router", {}).get("description", ""),
         custom_tools=raw.get("tools", {}),
     )
+
+
+def _install_pack_requirements(pack: Pack) -> None:
+    """Install dependencies from the pack's requirements.txt if present."""
+    req_path = pack.directory / "requirements.txt"
+    if not req_path.exists():
+        return
+
+    import subprocess
+    import sys
+
+    logger.info("Installing pack requirements: %s", req_path)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", str(req_path), "--quiet"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if result.stdout.strip():
+            logger.debug("pip: %s", result.stdout.strip())
+    except subprocess.CalledProcessError as e:
+        logger.warning(
+            "Failed to install requirements for pack %s: %s",
+            pack.id, e.stderr.strip(),
+        )
+
+
+def load_custom_tools(pack: Pack) -> list[dict]:
+    """Load custom Python tool modules declared in a pack's MANIFEST.yaml.
+
+    If the pack directory contains a ``requirements.txt``, its dependencies
+    are installed before any tool modules are imported.
+
+    Each tool module must expose a ``TOOL_DEF`` dict with keys:
+    ``name``, ``description``, ``input_schema``, ``handler``.
+    """
+    if pack.custom_tools:
+        _install_pack_requirements(pack)
+
+    results: list[dict] = []
+
+    for tool_name, tool_config in pack.custom_tools.items():
+        module_rel = tool_config.get("module", f"tools/{tool_name}.py")
+        module_path = pack.directory / module_rel
+
+        if not module_path.exists():
+            logger.warning(
+                "Custom tool module not found: %s (pack=%s, tool=%s)",
+                module_path, pack.id, tool_name,
+            )
+            continue
+
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"quickdraw_pack_{pack.id}_tool_{tool_name}", module_path,
+            )
+            if spec is None or spec.loader is None:
+                logger.warning(
+                    "Could not create module spec for %s (pack=%s)", module_path, pack.id,
+                )
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception:
+            logger.warning(
+                "Failed to import custom tool module %s (pack=%s, tool=%s)",
+                module_path, pack.id, tool_name,
+                exc_info=True,
+            )
+            continue
+
+        tool_def = getattr(mod, "TOOL_DEF", None)
+        if not isinstance(tool_def, dict):
+            logger.warning(
+                "Module %s has no valid TOOL_DEF dict (pack=%s, tool=%s)",
+                module_path, pack.id, tool_name,
+            )
+            continue
+
+        results.append(tool_def)
+
+    return results
 
 
 def discover_packs(packs_root: Path) -> dict[str, Pack]:

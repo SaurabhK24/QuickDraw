@@ -33,3 +33,14 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Node packages
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Dashboard build output
+dashboard/build/
+dashboard/.cache/
+

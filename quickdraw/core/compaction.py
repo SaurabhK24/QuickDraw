@@ -44,7 +44,7 @@ class Compactor:
         self._sessions = sessions
         self._model = model
         self._threshold = threshold
-        self._client = anthropic.Anthropic()
+        self._client = anthropic.AsyncAnthropic()
 
     async def compact(
         self, session_key: str, messages: list[dict],
@@ -66,7 +66,7 @@ class Compactor:
         recent_messages = messages[split:]
 
         try:
-            summary_response = self._client.messages.create(
+            summary_response = await self._client.messages.create(
                 model=self._model,
                 max_tokens=SUMMARY_MAX_TOKENS,
                 messages=[{

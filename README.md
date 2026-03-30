@@ -1,127 +1,141 @@
 # QuickDraw
 
-An agentic framework for building "always-on" AI agents with persistent memory, multi-channel presence, and tool use.
-
-## What It Does
-
-QuickDraw gives you a personal AI assistant that:
-
-- **Lives in your messaging apps** — Discord, terminal REPL, HTTP API (more channels coming)
-- **Remembers everything** — persistent sessions (JSONL) and long-term memory across session resets
-- **Uses tools** — shell commands, file I/O, web search, memory storage
-- **Runs on a schedule** — heartbeat tasks fire on cron without you asking
-- **Supports multiple agents** — route messages to specialized agents (e.g. `/research`)
-- **Runs on your hardware** — laptop, VPS, Mac Mini — always on, under your control
-
-## Quick Start
-
-```bash
-# Install
-pip install -e .
-
-# For Discord support
-pip install -e '.[discord]'
-
-# Initialize workspace
-quickdraw init
-
-# Set your API key
-export ANTHROPIC_API_KEY=sk-...
-
-# Run
-quickdraw run
-```
-
-This starts the REPL channel by default. Edit `~/.quickdraw/config.yaml` to enable Discord, HTTP API, or heartbeats.
+An agentic workflow platform for building durable, multi-agent AI systems with persistent memory, multi-channel presence, and enterprise-grade orchestration.
 
 ## Architecture
 
 ```
-Channel (Discord / REPL / HTTP)
-  → Gateway (routes to agent, manages sessions)
-    → Command Queue (per-session lock)
-      → Agent Loop (LLM + tool execution cycle)
-        → Session Manager (JSONL persistence)
-        → Tool Registry (execute tools)
-        → Memory System (long-term storage)
-        → Context Compaction (summarize when context is full)
+┌─────────────────────────────────────────────────────────┐
+│  Dashboard (Remix)  :3000                               │
+│  ─ pack browser, run submission, SSE streaming          │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│  Go Control Plane  :8080                                │
+│  ─ API edge, auth, tenant routing, SSE, reverse proxy   │
+└──────────┬───────────────────────────┬──────────────────┘
+           │                           │
+┌──────────▼──────────┐   ┌────────────▼─────────────────┐
+│  Temporal  :7233     │   │  Python Agent Runtime  :5050 │
+│  ─ durable workflows │   │  ─ channels (HTTP/Discord/   │
+│  ─ retries, recovery │   │    Teams/REPL)               │
+│  ─ approval gates    │   │  ─ gateway → Temporal bridge │
+└──────────┬──────────┘   └──────────────────────────────┘
+           │
+┌──────────▼──────────────────────────────────────────────┐
+│  Python Temporal Worker                                 │
+│  ─ execute_agent_turn (tool-isolated, SOUL-aware)       │
+│  ─ route_message (LLM-powered pack classification)      │
+│  ─ resolve_workflow (multi-step chain execution)         │
+│  ─ PackMultiStepWorkflow (agent chaining + approvals)   │
+│  ─ RouterWorkflow (top-level dispatcher)                │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Configuration
+## Quick Start
 
-Copy `config.example.yaml` to `~/.quickdraw/config.yaml`:
+```bash
+# Set API keys
+export ANTHROPIC_API_KEY=sk-ant-...
+export SERPER_API_KEY=...          # optional, enables real web search
+
+# Start the full stack
+docker compose up --build
+
+# Or run locally (Python only, no Temporal)
+pip install -e '.[teams]'
+quickdraw run
+```
+
+### Ports
+
+| Service | Port | URL |
+|---------|------|-----|
+| Dashboard | 3000 | http://localhost:3000 |
+| Go Control Plane | 8080 | http://localhost:8080 |
+| Python HTTP Channel | 5050 | http://localhost:5050 |
+| Temporal UI | 8233 | http://localhost:8233 |
+
+## Packs
+
+Packs are drop-in vertical agent configurations. Each pack is a directory with a `MANIFEST.yaml` defining agents, tools, and multi-step workflows.
+
+| Pack | Agents | Workflows | Custom Tools |
+|------|--------|-----------|--------------|
+| **GovCon** | Proposal Analyst, Proposal Writer, Compliance Checker, Capture Strategist, DCAA Auditor | Proposal Optimization, Compliance Review, Capture Analysis, Invoice Audit | `neuroscore` |
+| **Sales** | Sales Rep, Sales Analyst | Lead Qualification, Deal Review | — |
+| **Billing** | Invoice Processor, Collections Agent, Finance Analyst | Invoice Processing, Collections | — |
+| **Executive Assistant** | EA, Research Specialist | Meeting Prep, Research Brief | — |
+
+### Creating a Pack
 
 ```yaml
-workspace: ~/.quickdraw
-
-llm:
-  provider: anthropic
-  model: claude-sonnet-4-5-20250929
-  max_tokens: 4096
+# packs/my-vertical/MANIFEST.yaml
+id: my-vertical
+name: My Vertical
+description: What this pack does
 
 agents:
-  main:
-    name: Jarvis
-    soul: SOUL.md
+  my-agent:
+    name: My Agent
+    soul: souls/my-agent.md    # system prompt
+    tools: [web_search, filesystem, memory]
 
-channels:
-  repl:
-    enabled: true
-  discord:
-    enabled: true
-    token: ${DISCORD_BOT_TOKEN}
-    session_scope: per-user
+workflows:
+  my-workflow:
+    name: My Workflow
+    trigger: "when to route here"
+    steps:
+      - agent: my-agent
+        prompt_template: |
+          Do something with: {input}
 
-heartbeats:
-  morning-briefing:
-    schedule: "30 7 * * *"
-    agent: main
-    prompt: "Good morning! Give me a motivational quote."
-
-permissions:
-  mode: ask
-  safe_commands: [ls, cat, date, pwd, git, python]
+router:
+  description: "Keywords that trigger routing to this pack"
 ```
 
 ## Key Concepts
 
-**SOUL.md** — A markdown file defining the agent's personality, injected as the system prompt on every LLM call. Edit `~/.quickdraw/SOUL.md` to customize.
+**SOUL.md** — Markdown system prompt defining an agent's personality, domain expertise, and working principles.
 
-**Sessions** — JSONL files, one per conversation. Append-only for crash safety. Automatically compacted when they approach the context window limit.
+**Pack System** — Vertical specialization via `MANIFEST.yaml`. Each pack declares agents (with SOULs and tool permissions), multi-step workflows (with approval gates), and custom tools.
 
-**Memory** — File-based persistent storage (`save_memory` / `memory_search` tools). Survives session resets. Shared across agents.
+**Router Workflow** — LLM-powered classifier that reads all loaded packs and dispatches incoming messages to the best-fit agent or workflow.
 
-**Heartbeats** — Cron-scheduled agent tasks with isolated sessions, so they don't clutter your conversations.
+**Durable Execution** — All workflows run through Temporal with retry policies, heartbeats, and crash recovery. Kill the worker mid-task — it resumes.
 
-**Gateway** — One central process managing all channels. Same agent, same sessions, same memory — regardless of which app you message from.
+**Custom Tools** — Packs can ship Python tool modules in `tools/`. The loader dynamically imports them and registers in the agent's tool registry.
+
+**Channels** — HTTP, Discord, REPL, MS Teams. All channel messages bridge to Temporal when connected.
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `SERPER_API_KEY` | No | Enables real web search (serper.dev) |
+| `MS_APP_ID` | No | Teams bot app ID |
+| `MS_APP_PASSWORD` | No | Teams bot secret |
+| `MS_TENANT_ID` | No | Azure AD tenant |
 
 ## Project Structure
 
 ```
-quickdraw/
-├── __main__.py          # CLI: quickdraw run / quickdraw init
-├── config.py            # YAML config loader with ${ENV_VAR} support
-├── gateway.py           # Central orchestrator
-├── router.py            # Multi-agent message routing
-├── heartbeat.py         # Cron-based scheduled tasks
-├── core/
-│   ├── session.py       # JSONL session persistence
-│   ├── loop.py          # Agent loop (LLM + tool cycle)
-│   ├── queue.py         # Per-session async locking
-│   ├── compaction.py    # Context window summarization
-│   ├── memory.py        # Long-term memory store
-│   └── permissions.py   # Command safety + approvals
-├── tools/
-│   ├── registry.py      # Tool registration system
-│   ├── shell.py         # Shell command execution
-│   ├── filesystem.py    # File read/write
-│   ├── memory_tools.py  # save_memory, memory_search
-│   └── web.py           # Web search (placeholder)
-└── channels/
-    ├── base.py          # Abstract channel interface
-    ├── discord_channel.py
-    ├── repl.py
-    └── http_api.py
+├── quickdraw/                 # Python agent runtime
+│   ├── core/                  # session, loop, memory, permissions, compaction
+│   ├── tools/                 # shell, filesystem, memory, web search
+│   ├── channels/              # HTTP, Discord, REPL, Teams
+│   ├── workflows/             # Temporal: activities, worker, durable_run,
+│   │                          #   router_workflow, pack_workflow
+│   └── packs/                 # Pack loader + router context builder
+├── controlplane/              # Go API edge (chi router, Temporal client, SSE)
+├── dashboard/                 # Remix + Tailwind dashboard
+├── packs/                     # Vertical pack definitions
+│   ├── govcon/                #   GovCon (neuroscore tool, 5 agents, 4 workflows)
+│   ├── sales/                 #   Sales (2 agents, 2 workflows)
+│   ├── billing/               #   Billing (3 agents, 2 workflows)
+│   └── executive-assistant/   #   EA (2 agents, 2 workflows)
+└── docker-compose.yml         # Full stack orchestration
 ```
 
 ## License

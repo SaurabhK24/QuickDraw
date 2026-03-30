@@ -43,6 +43,7 @@ services:
       dockerfile: Dockerfile
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
       MS_APP_ID: ${MS_APP_ID:-}
       MS_APP_PASSWORD: ${MS_APP_PASSWORD:-}
       MS_TENANT_ID: ${MS_TENANT_ID:-}
@@ -92,8 +93,12 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
+      # route_message still calls Anthropic directly for routing classification
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
       TEMPORAL_ADDRESS: temporal:7233
+      # all agent-turn LLM execution is delegated to the gateway service
+      QUICKDRAW_GATEWAY_URL: http://quickdraw-python:5000
     volumes:
       - ./packs:/app/.quickdraw/packs:ro
     command:
@@ -106,11 +111,16 @@ services:
         until python -c "import socket; s=socket.create_connection(('temporal',7233),2); s.close()" 2>/dev/null; do
           sleep 3
         done
-        echo "Temporal reachable, starting worker"
+        echo "Waiting for gateway..."
+        until python -c "import urllib.request; urllib.request.urlopen('http://quickdraw-python:5000/health', timeout=2)" 2>/dev/null; do
+          sleep 3
+        done
+        echo "Gateway reachable, starting worker"
         exec python -m quickdraw.workflows.worker
     restart: on-failure
     depends_on:
       - temporal
+      - quickdraw-python
 
   controlplane:
     build:
@@ -125,6 +135,17 @@ services:
     depends_on:
       - quickdraw-python
       - temporal
+
+  dashboard:
+    build:
+      context: dashboard/
+      dockerfile: Dockerfile
+    environment:
+      API_URL: http://controlplane:8080/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - controlplane
 
 volumes:
   temporal_pgdata:

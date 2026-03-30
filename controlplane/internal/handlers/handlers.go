@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -233,7 +234,7 @@ func EventStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -241,12 +242,55 @@ func EventStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, _ := json.Marshal(map[string]string{
-		"type":   "connected",
-		"tenant": tenant(r),
-	})
-	w.Write([]byte("data: "))
-	w.Write(data)
-	w.Write([]byte("\n\n"))
+	workflowID := r.URL.Query().Get("workflow_id")
+
+	sendSSE(w, flusher, "connected", map[string]string{"tenant": tenant(r)})
+
+	if workflowID == "" {
+		<-r.Context().Done()
+		return
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			output, status, err := temporal.GetRunResult(r.Context(), workflowID)
+			if err != nil {
+				sendSSE(w, flusher, "error", map[string]string{"error": err.Error()})
+				return
+			}
+
+			event := map[string]any{
+				"workflow_id": workflowID,
+				"status":      status,
+			}
+
+			if output != nil {
+				event["response_text"] = output.ResponseText
+				event["step_count"] = output.StepCount
+			}
+
+			switch status {
+			case "completed":
+				sendSSE(w, flusher, "result", event)
+				return
+			case "failed", "cancelled", "terminated", "timed_out":
+				sendSSE(w, flusher, "status", event)
+				return
+			default:
+				sendSSE(w, flusher, "progress", event)
+			}
+		}
+	}
+}
+
+func sendSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) {
+	jsonData, _ := json.Marshal(data)
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, jsonData)
 	flusher.Flush()
 }

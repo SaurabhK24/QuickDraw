@@ -1,0 +1,218 @@
+id: govcon
+name: GovCon Capture & Proposal Pack
+description: >
+  End-to-end government contracting support — proposal neural optimization,
+  FAR/DFARS compliance, DCAA-ready invoicing, capture management, and
+  competitive intelligence. Integrates neuroscience-backed persuasion scoring
+  (trust, resistance, engagement, cognitive load) for proposal language.
+version: "1.0"
+
+agents:
+  proposal-analyst:
+    name: Proposal Neural Analyst
+    soul: souls/proposal-analyst.md
+    tools: [neuroscore, web_search, filesystem, memory]
+    model: null
+
+  proposal-writer:
+    name: Proposal Writer
+    soul: souls/proposal-writer.md
+    tools: [neuroscore, filesystem, memory, web_search]
+    model: null
+
+  compliance-checker:
+    name: Compliance Checker
+    soul: souls/compliance-checker.md
+    tools: [web_search, filesystem, memory]
+    model: null
+
+  capture-strategist:
+    name: Capture Strategist
+    soul: souls/capture-strategist.md
+    tools: [web_search, filesystem, memory, shell]
+    model: null
+
+  invoice-auditor:
+    name: DCAA Invoice Auditor
+    soul: souls/invoice-auditor.md
+    tools: [filesystem, memory]
+    model: null
+
+tools:
+  neuroscore:
+    name: neuroscore
+    description: Neural persuasion scoring tool — scores proposal sentences for trust, resistance, engagement, and cognitive load using neuroscience-backed ROI mapping
+    module: tools/neuroscore.py
+
+workflows:
+  proposal-optimization:
+    name: Proposal Neural Optimization Pipeline
+    trigger: >
+      user has proposal text to optimize, wants to improve proposal language,
+      needs persuasion scoring, or wants to strengthen a proposal section
+    steps:
+      - agent: proposal-analyst
+        prompt_template: |
+          Analyze this proposal text using neural persuasion scoring. For each sentence:
+          1. Score trust (vmPFC), resistance (ACC), engagement (precuneus), cognitive load (DLPFC), and salience (amygdala)
+          2. Compute a composite persuasion score (0-100)
+          3. Flag sentences scoring below 50 for rewriting
+
+          Use the neuroscore tool to score key sentences.
+
+          Proposal Text:
+          {input}
+
+          Output a structured analysis with: per-sentence scores, overall document score,
+          top 5 weakest sentences, and top 5 strongest sentences.
+
+      - agent: proposal-writer
+        prompt_template: |
+          Based on this neural analysis, rewrite the flagged weak sentences.
+          Apply the 10 neuroscience rewriting principles:
+          1. Specificity over abstraction
+          2. Narrative over claims
+          3. Agency to the evaluator ("You will see...")
+          4. Concrete nouns with numbers
+          5. Short sentences under cognitive load
+          6. Past tense proof before forward claims
+          7. Eliminate hedge words (leverage, synergy, robust, world-class)
+          8. Risk acknowledgment builds trust
+          9. Numbers are anchors
+          10. Active voice always
+
+          Use the neuroscore tool to verify each rewrite improves the score.
+
+          Analysis & Flagged Sentences:
+          {input}
+
+          Output: Original → Rewritten pairs with before/after scores, plus an overall
+          improvement summary.
+        requires_approval: false
+
+      - agent: proposal-analyst
+        prompt_template: |
+          Final verification pass. Re-score the full optimized proposal text.
+          Compare the before and after document-level scores.
+
+          Optimized Proposal:
+          {input}
+
+          Output: Final document persuasion score, signal-by-signal comparison
+          (trust, resistance, engagement, load, salience), and any remaining
+          sentences that still need attention.
+
+  compliance-review:
+    name: FAR/DFARS Compliance Review
+    trigger: >
+      user needs compliance checking, FAR/DFARS review, GSA AI clause assessment,
+      or regulatory gap analysis for a government proposal or contract
+    steps:
+      - agent: compliance-checker
+        prompt_template: |
+          Review this document for FAR/DFARS compliance. Check against:
+          - FAR Part 15 (Contracting by Negotiation) requirements
+          - DFARS 252.204-7012 (NIST 800-171 cybersecurity)
+          - GSA AI clause (March 2026) requirements if applicable
+          - Section L/M evaluation criteria alignment
+          - Required certifications and representations
+
+          Document:
+          {input}
+
+          Output: Compliance checklist with PASS/FAIL/NEEDS REVIEW per requirement,
+          specific citations of missing or non-compliant language, and remediation recommendations.
+        requires_approval: false
+
+      - agent: proposal-writer
+        prompt_template: |
+          Based on this compliance review, draft corrective language for all
+          FAIL and NEEDS REVIEW items. Write insertion-ready text that the
+          proposal team can paste directly into the document.
+
+          Compliance Review:
+          {input}
+
+          Output: For each finding — the gap, the corrective text, and where in
+          the proposal it should be inserted.
+
+  capture-analysis:
+    name: Capture & Competitive Intelligence
+    trigger: >
+      user wants to research a government opportunity, analyze an RFP/RFI,
+      assess competitive landscape, build a capture strategy, or research
+      incumbent contractors
+    steps:
+      - agent: capture-strategist
+        prompt_template: |
+          Research and analyze this government contracting opportunity.
+          Gather intelligence on:
+          - Agency background and mission priorities
+          - Incumbent contractor(s) and past performance
+          - Likely evaluation criteria and hot buttons
+          - Competitive landscape — who else is likely bidding
+          - Relevant NAICS codes and set-aside requirements
+          - Recent similar awards (FPDS/USASpending data patterns)
+
+          Opportunity/RFP:
+          {input}
+
+          Output: Structured capture brief with Win Probability assessment (1-100),
+          Pwin factors, recommended teaming strategy, and price-to-win indicators.
+        requires_approval: false
+
+      - agent: capture-strategist
+        prompt_template: |
+          Based on this capture intelligence, build a competitive differentiation
+          strategy. For each likely competitor:
+          - Their strengths and weaknesses
+          - How to ghost them in the proposal
+          - How to highlight our differentiators against them
+
+          Then produce a win theme framework with 3-5 themes that should run
+          through every section of the proposal.
+
+          Capture Intel:
+          {input}
+
+  invoice-audit:
+    name: DCAA Invoice Audit Pipeline
+    trigger: >
+      user has invoices to audit for DCAA compliance, needs to validate
+      timekeeping entries, or wants to check billing rates against contracts
+    steps:
+      - agent: invoice-auditor
+        prompt_template: |
+          Audit this invoice/timesheet data for DCAA compliance. Check:
+          - Labor categories match contract CLINs
+          - Billing rates do not exceed contract ceiling rates
+          - Hours are reasonable (no >10hr single-day entries without justification)
+          - Indirect rate applications (fringe, overhead, G&A, fee) are correct
+          - Cost classifications (direct vs. indirect) are appropriate
+          - Unallowable costs (FAR 31.205) are excluded
+
+          Invoice/Timesheet Data:
+          {input}
+
+          Output: Line-by-line audit findings, risk level (Low/Medium/High/Critical),
+          total questioned costs, and corrective actions required.
+        requires_approval: true
+
+      - agent: compliance-checker
+        prompt_template: |
+          Cross-reference these audit findings against FAR 31.2 cost principles.
+          For each questioned cost, cite the specific FAR clause and provide
+          the regulatory basis for the finding.
+
+          Audit Findings:
+          {input}
+
+          Output: Findings with FAR citations, recommended adjustments to the
+          next invoice submission, and a DCAA-ready response memo template.
+
+router:
+  description: >
+    Government contracting tasks: proposal writing, proposal optimization,
+    neural persuasion scoring, FAR/DFARS compliance, DCAA audit, capture
+    management, competitive intelligence, RFP analysis, win strategy,
+    GovCon invoicing, timekeeping review, GSA AI clause, Section L/M

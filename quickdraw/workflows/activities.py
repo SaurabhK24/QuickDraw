@@ -1,121 +1,42 @@
 """Temporal activities — the units of work executed by Python agent workers.
 
 Activities are the atomic units that Temporal schedules, retries, and tracks.
-Each activity runs in the Python worker process with full access to the runtime.
+Each activity is a thin orchestration shim: it delegates actual LLM execution
+to the QuickDraw gateway via HTTP (POST /run-turn). The gateway owns all
+Anthropic API connections; the worker owns sequencing, retries, and approvals.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import aiohttp
 from temporalio import activity
 
 logger = logging.getLogger(__name__)
 
-_WORKSPACE: Path | None = None
+# URL of the running quickdraw-python gateway. In Docker Compose this is
+# http://quickdraw-python:5000; locally it defaults to localhost:5000.
+_GATEWAY_URL = os.environ.get("QUICKDRAW_GATEWAY_URL", "http://localhost:5000")
+
 _PACKS: dict | None = None
 
 
 def _get_workspace() -> Path:
-    global _WORKSPACE
-    if _WORKSPACE is None:
-        _WORKSPACE = Path("/app/.quickdraw") if Path("/app/.quickdraw").exists() else Path.home() / ".quickdraw"
-    return _WORKSPACE
+    return Path("/app/.quickdraw") if Path("/app/.quickdraw").exists() else Path.home() / ".quickdraw"
 
 
-def _get_packs():
+def _get_packs() -> dict:
     global _PACKS
     if _PACKS is None:
         from quickdraw.packs.loader import discover_packs
         packs_root = _get_workspace() / "packs"
         _PACKS = discover_packs(packs_root) if packs_root.exists() else {}
     return _PACKS
-
-
-def _build_registry_for_agent(agent_tools: list[str] | None = None):
-    """Build a ToolRegistry with only the specified tools (or all if None)."""
-    from quickdraw.core.permissions import PermissionManager
-    from quickdraw.tools.registry import ToolRegistry
-
-    registry = ToolRegistry()
-    workspace = _get_workspace()
-
-    all_tools = agent_tools is None
-    tool_set = set(agent_tools) if agent_tools else set()
-
-    permissions = PermissionManager(
-        approvals_file=workspace / "exec-approvals.json",
-        safe_commands=["ls", "cat", "echo", "date", "pwd", "whoami", "python", "node"],
-        mode="record",
-    )
-
-    from quickdraw.tools import filesystem, memory_tools, shell, web
-
-    if all_tools or tool_set & {"shell", "run_command"}:
-        shell.register(registry, permissions)
-
-    if all_tools or tool_set & {"filesystem", "read_file", "write_file", "list_directory"}:
-        filesystem.register(registry)
-
-    if all_tools or tool_set & {"memory", "memory_read", "memory_write", "memory_search"}:
-        memory_tools.register(registry, workspace / "memory")
-
-    if all_tools or tool_set & {"web", "web_search"}:
-        web.register(registry)
-
-    return registry
-
-
-def _resolve_soul(agent_id: str) -> str:
-    """Resolve the SOUL prompt for an agent, checking packs then default."""
-    packs = _get_packs()
-
-    if "." in agent_id:
-        pack_id, local_agent_id = agent_id.split(".", 1)
-        if pack_id in packs and local_agent_id in packs[pack_id].agents:
-            return packs[pack_id].agents[local_agent_id].soul
-    else:
-        for pack in packs.values():
-            if agent_id in pack.agents:
-                return pack.agents[agent_id].soul
-
-    workspace = _get_workspace()
-    soul_path = workspace / "SOUL.md"
-    if soul_path.exists():
-        return soul_path.read_text()
-    return f"You are {agent_id}, a helpful AI assistant."
-
-
-def _get_agent_tools(agent_id: str) -> list[str] | None:
-    """Get the tool list for a pack agent, or None for all tools."""
-    packs = _get_packs()
-
-    if "." in agent_id:
-        pack_id, local_agent_id = agent_id.split(".", 1)
-        if pack_id in packs and local_agent_id in packs[pack_id].agents:
-            return packs[pack_id].agents[local_agent_id].tools
-
-    for pack in packs.values():
-        if agent_id in pack.agents:
-            return pack.agents[agent_id].tools
-
-    return None
-
-
-async def _heartbeat_loop(main_task: asyncio.Task, interval: float = 10.0) -> None:
-    """Send periodic heartbeats; cancel the main task if workflow is cancelled."""
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            activity.heartbeat()
-        except asyncio.CancelledError:
-            main_task.cancel()
-            raise
 
 
 # ---------------------------------------------------------------------------
@@ -159,51 +80,40 @@ class RouteOutput:
 
 @activity.defn
 async def execute_agent_turn(input: AgentRunInput) -> AgentRunOutput:
-    """Execute a single agent turn with pack-aware tool isolation and SOUL resolution."""
-    from quickdraw.core.loop import AgentLoop
-    from quickdraw.core.session import SessionManager
+    """Execute a single agent turn by delegating to the QuickDraw gateway.
 
+    The worker is a pure Temporal orchestrator — it does not run AgentLoop or
+    call Anthropic directly. All LLM execution happens in the gateway process
+    (quickdraw-python), which is reached via POST /run-turn.
+    """
     activity.logger.info(
-        "Agent turn: tenant=%s agent=%s session=%s",
-        input.tenant_id, input.agent_id, input.session_key,
+        "Agent turn: tenant=%s agent=%s session=%s → %s/run-turn",
+        input.tenant_id, input.agent_id, input.session_key, _GATEWAY_URL,
     )
 
-    agent_tools = _get_agent_tools(input.agent_id)
-    registry = _build_registry_for_agent(agent_tools)
-    loop = AgentLoop(registry)
+    payload = {
+        "agent_id": input.agent_id,
+        "session_key": input.session_key,
+        "user_text": input.user_text,
+        "model": input.model,
+        "max_tokens": input.max_tokens,
+    }
 
-    workspace = _get_workspace()
-    sessions = SessionManager(workspace / "sessions")
-    messages = sessions.load(input.session_key)
-    messages.append({"role": "user", "content": input.user_text})
-
-    system_prompt = _resolve_soul(input.agent_id)
-
-    async def _do_run():
-        return await loop.run(
-            messages=messages,
-            system_prompt=system_prompt,
-            model=input.model,
-            max_tokens=input.max_tokens,
-        )
-
-    main_task = asyncio.create_task(_do_run())
-    hb_task = asyncio.create_task(_heartbeat_loop(main_task, interval=10.0))
-    try:
-        response_text, messages = await main_task
-    finally:
-        hb_task.cancel()
-        try:
-            await hb_task
-        except asyncio.CancelledError:
-            pass
-
-    sessions.save(input.session_key, messages)
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{_GATEWAY_URL}/run-turn",
+            json=payload,
+            timeout=aiohttp.ClientTimeout(total=300),
+        ) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                raise RuntimeError(f"Gateway /run-turn returned {resp.status}: {body[:200]}")
+            data = await resp.json()
 
     return AgentRunOutput(
-        response_text=response_text,
+        response_text=data.get("response_text", ""),
         run_id=input.session_key,
-        step_count=len(messages),
+        step_count=data.get("step_count", 0),
     )
 
 

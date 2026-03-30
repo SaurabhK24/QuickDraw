@@ -40,7 +40,10 @@ class AgentLoop:
 
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
-        self._client = anthropic.Anthropic()
+        # AsyncAnthropic is required here — this method is always called from
+        # an asyncio context (Temporal worker, gateway), and the sync Anthropic
+        # client's httpx.Client connection pool fails under those event loops.
+        self._client = anthropic.AsyncAnthropic()
 
     async def run(
         self,
@@ -66,7 +69,7 @@ class AgentLoop:
                 kwargs["tools"] = tool_defs
 
             try:
-                response = self._client.messages.create(**kwargs)
+                response = await self._client.messages.create(**kwargs)
             except anthropic.APIError as e:
                 error_msg = f"API error: {e.message}" if hasattr(e, "message") else f"API error: {e}"
                 logger.error(error_msg)
