@@ -325,7 +325,7 @@ class Gateway:
                         )
 
         # --- run the agent turn ---
-        loop = AgentLoop(registry)
+        loop = AgentLoop(registry, self._llm)
         sessions = SessionManager(self.config.sessions_dir)
         messages = sessions.load(session_key)
         messages.append({"role": "user", "content": user_text})
