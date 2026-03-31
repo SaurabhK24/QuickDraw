@@ -29,6 +29,10 @@ try:
 except ImportError:
     platform_db = None  # type: ignore[assignment]
 from quickdraw.tools.registry import ToolRegistry
+from quickdraw.llm.anthropic_client import AnthropicClient
+from quickdraw.llm.gemini_client import GeminiClient
+from quickdraw.llm.openai_client import OpenAIClient
+from quickdraw.llm.router import LLMRouter, ProviderSpec
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +57,8 @@ class Gateway:
         self.registry = ToolRegistry()
         self._register_tools()
 
-        self.loop = AgentLoop(self.registry)
+        self._llm = self._build_llm()
+        self.loop = AgentLoop(self.registry, self._llm)
         self.channels: list[ChannelAdapter] = []
 
         self._router: Any = None
@@ -63,6 +68,48 @@ class Gateway:
         self._packs: dict = {}
         self._pack_context: str = ""
         self._available_workflows: list[dict] = []
+
+    def _build_llm(self) -> LLMRouter:
+        llm_cfg = self.config.llm
+        providers = llm_cfg.providers
+
+        # If config didn't specify providers list, synthesize from legacy fields.
+        if not providers:
+            from quickdraw.config import LLMProviderConfig
+
+            providers = [
+                LLMProviderConfig(
+                    provider=llm_cfg.provider,
+                    model=llm_cfg.model,
+                    max_tokens=llm_cfg.max_tokens,
+                    api_key=None,
+                )
+            ]
+
+        chain: list[tuple[ProviderSpec, Any]] = []
+        for p in providers:
+            provider = (p.provider or "anthropic").lower()
+            model = p.model or llm_cfg.model
+            max_tokens = p.max_tokens or llm_cfg.max_tokens
+
+            if provider == "anthropic":
+                chain.append((ProviderSpec(provider=provider, model=model, max_tokens=max_tokens), AnthropicClient()))
+            elif provider == "openai":
+                if not p.api_key:
+                    raise ValueError("OpenAI provider requires llm.providers[].api_key")
+                chain.append(
+                    (ProviderSpec(provider=provider, model=model, max_tokens=max_tokens), OpenAIClient(p.api_key))
+                )
+            elif provider == "gemini":
+                if not p.api_key:
+                    raise ValueError("Gemini provider requires llm.providers[].api_key")
+                chain.append(
+                    (ProviderSpec(provider=provider, model=model, max_tokens=max_tokens), GeminiClient(p.api_key))
+                )
+            else:
+                raise ValueError(f"Unknown LLM provider: {provider}")
+
+        return LLMRouter(chain)
 
     def _register_tools(self) -> None:
         """Register all built-in tools."""
@@ -104,6 +151,9 @@ class Gateway:
         elif kind == "teams":
             from quickdraw.channels.teams_channel import TeamsChannel
             return TeamsChannel(kind, settings)
+        elif kind == "signal":
+            from quickdraw.channels.signal_channel import SignalChannel
+            return SignalChannel(kind, settings)
         else:
             logger.warning("Unknown channel type: %s", kind)
             return None
@@ -473,7 +523,7 @@ class Gateway:
             self._router = AgentRouter(self.config.agents)
 
         from quickdraw.core.compaction import Compactor
-        self._compactor = Compactor(self.sessions, self.config.llm.model)
+        self._compactor = Compactor(self.sessions, llm=self._llm, model=self.config.llm.model)
 
         self.channels = self._create_channels()
         for ch in self.channels:

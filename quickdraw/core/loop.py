@@ -10,40 +10,21 @@ import json
 import logging
 from typing import Any
 
-import anthropic
-
 from quickdraw.tools.registry import ToolRegistry
+from quickdraw.llm.base import LLMClient
+from quickdraw.llm.types import extract_text
 
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_TURNS = 20
 
 
-def _serialize_content(content: list[Any]) -> list[dict]:
-    """Convert Anthropic API content blocks to JSON-serializable dicts."""
-    serialized = []
-    for block in content:
-        if hasattr(block, "text"):
-            serialized.append({"type": "text", "text": block.text})
-        elif getattr(block, "type", None) == "tool_use":
-            serialized.append({
-                "type": "tool_use",
-                "id": block.id,
-                "name": block.name,
-                "input": block.input,
-            })
-    return serialized
-
-
 class AgentLoop:
     """Runs one full agent turn: LLM call -> tool execution -> repeat."""
 
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(self, registry: ToolRegistry, llm: LLMClient) -> None:
         self._registry = registry
-        # AsyncAnthropic is required here — this method is always called from
-        # an asyncio context (Temporal worker, gateway), and the sync Anthropic
-        # client's httpx.Client connection pool fails under those event loops.
-        self._client = anthropic.AsyncAnthropic()
+        self._llm = llm
 
     async def run(
         self,
@@ -59,52 +40,48 @@ class AgentLoop:
         tool_defs = self._registry.definitions()
 
         for turn in range(MAX_TOOL_TURNS):
-            kwargs: dict[str, Any] = {
-                "model": model,
-                "max_tokens": max_tokens,
-                "system": system_prompt,
-                "messages": messages,
-            }
-            if tool_defs:
-                kwargs["tools"] = tool_defs
+            response = self._llm.complete(
+                messages=messages,
+                system=system_prompt,
+                model=model,
+                max_tokens=max_tokens,
+                tools=tool_defs if tool_defs else None,
+            )
 
-            try:
-                response = await self._client.messages.create(**kwargs)
-            except anthropic.APIError as e:
-                error_msg = f"API error: {e.message}" if hasattr(e, "message") else f"API error: {e}"
+            if response.stop_reason == "error":
+                error_msg = response.error or "LLM error"
                 logger.error(error_msg)
                 return error_msg, messages
 
-            content = _serialize_content(response.content)
+            content = response.content
 
             if response.stop_reason == "end_turn":
                 messages.append({"role": "assistant", "content": content})
-                text = "".join(
-                    b.text for b in response.content if hasattr(b, "text")
-                )
-                return text, messages
+                return extract_text(content), messages
 
             if response.stop_reason == "tool_use":
                 messages.append({"role": "assistant", "content": content})
 
                 tool_results = []
-                for block in response.content:
-                    if getattr(block, "type", None) == "tool_use":
-                        logger.info("Tool: %s(%s)", block.name, json.dumps(block.input)[:120])
-                        result = await self._registry.execute(block.name, block.input)
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_name = str(block.get("name"))
+                        tool_input = block.get("input") or {}
+                        tool_id = str(block.get("id"))
+                        logger.info("Tool: %s(%s)", tool_name, json.dumps(tool_input)[:120])
+                        result = await self._registry.execute(tool_name, tool_input)
                         logger.info("  -> %s", str(result)[:150])
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tool_id,
+                                "content": result,
+                            }
+                        )
 
                 messages.append({"role": "user", "content": tool_results})
             else:
                 messages.append({"role": "assistant", "content": content})
-                text = "".join(
-                    b.text for b in response.content if hasattr(b, "text")
-                )
-                return text, messages
+                return extract_text(content), messages
 
         return "(max tool turns reached)", messages

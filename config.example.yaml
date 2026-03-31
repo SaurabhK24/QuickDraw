@@ -14,9 +14,23 @@ workspace: ~/.quickdraw
 
 # --- LLM Provider ---
 llm:
-  provider: anthropic
-  model: claude-sonnet-4-5-20250929
+  # Back-compat (single provider):
+  # provider: anthropic
+  # model: claude-sonnet-4-5-20250929
+  # max_tokens: 4096
+
+  # New: ordered provider list (failover in order).
+  # Install deps: pip install 'quickdraw[llm]'
   max_tokens: 4096
+  providers:
+    - provider: anthropic
+      model: claude-sonnet-4-5-20250929
+    - provider: openai
+      model: gpt-4o-mini
+      api_key: ${OPENAI_API_KEY}
+    - provider: gemini
+      model: gemini-2.0-flash
+      api_key: ${GEMINI_API_KEY}
 
 # --- Agent Definitions ---
 # Each agent has a name, a SOUL file (personality), and optionally a model override.
@@ -44,6 +58,15 @@ channels:
     enabled: false
     token: ${DISCORD_BOT_TOKEN}
     session_scope: per-user  # per-user | per-channel | per-channel-peer
+
+  # Signal — via signal-cli REST API (Docker)
+  # Requires: docker run -d -p 8080:8080 -v ./signal-data:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api
+  signal:
+    enabled: false
+    api_url: http://localhost:8080
+    number: ${SIGNAL_NUMBER}        # Your registered Signal number (e.g. +1234567890)
+    session_scope: per-channel      # per-user | per-channel | per-channel-peer
+    poll_interval: 1.0              # Seconds between polling for new messages
 
   # HTTP API — POST /chat for programmatic access
   http:

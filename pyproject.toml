@@ -29,6 +29,10 @@ teams = [
     "botbuilder-core",
     "botbuilder-integration-aiohttp",
 ]
+llm = [
+    "openai",
+    "google-genai",
+]
 all = [
     "discord.py",
     "botbuilder-core",
@@ -36,6 +40,9 @@ all = [
     "sqlalchemy[asyncio]",
     "asyncpg",
     "alembic",
+    "temporalio",
+    "openai",
+    "google-genai",
 ]
 dev = [
     "pytest",

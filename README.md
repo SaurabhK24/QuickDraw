@@ -94,6 +94,21 @@ router:
   description: "Keywords that trigger routing to this pack"
 ```
 
+You can also keep legacy single-provider config:
+
+```yaml
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-5-20250929
+  max_tokens: 4096
+```
+
+### Provider Notes
+
+- Anthropic currently supports full tool-use in the agent loop.
+- OpenAI and Gemini currently run as text-only fallback providers (no tool calls yet).
+- If Anthropic is rate-limited/down, QuickDraw can still reply through fallback providers.
+
 ## Key Concepts
 
 **SOUL.md** — Markdown system prompt defining an agent's personality, domain expertise, and working principles.

@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 import logging
 
-import anthropic
-
 from quickdraw.core.session import SessionManager
+from quickdraw.llm.base import LLMClient
+from quickdraw.llm.types import extract_text
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,14 @@ class Compactor:
     def __init__(
         self,
         sessions: SessionManager,
+        llm: LLMClient,
         model: str = "claude-sonnet-4-5-20250929",
         threshold: int = TOKEN_THRESHOLD,
     ) -> None:
         self._sessions = sessions
+        self._llm = llm
         self._model = model
         self._threshold = threshold
-        self._client = anthropic.AsyncAnthropic()
 
     async def compact(
         self, session_key: str, messages: list[dict],
@@ -66,16 +67,23 @@ class Compactor:
         recent_messages = messages[split:]
 
         try:
-            summary_response = await self._client.messages.create(
+            summary_response = self._llm.complete(
                 model=self._model,
                 max_tokens=SUMMARY_MAX_TOKENS,
-                messages=[{
-                    "role": "user",
-                    "content": COMPACTION_PROMPT + json.dumps(old_messages, indent=2),
-                }],
+                system="",
+                tools=None,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": COMPACTION_PROMPT + json.dumps(old_messages, indent=2),
+                    }
+                ],
             )
 
-            summary_text = summary_response.content[0].text
+            if summary_response.stop_reason == "error":
+                raise RuntimeError(summary_response.error or "compaction LLM error")
+
+            summary_text = extract_text(summary_response.content)
 
             compacted = [
                 {"role": "user", "content": f"[Previous conversation summary]\n{summary_text}"},
