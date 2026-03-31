@@ -14,16 +14,33 @@ dependencies = [
     "pyyaml",
     "aiohttp",
     "croniter",
+    "httpx",
 ]
 
 [project.optional-dependencies]
+platform = [
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
+    "temporalio",
+]
 discord = ["discord.py"]
+teams = [
+    "botbuilder-core",
+    "botbuilder-integration-aiohttp",
+]
 llm = [
     "openai",
     "google-genai",
 ]
 all = [
     "discord.py",
+    "botbuilder-core",
+    "botbuilder-integration-aiohttp",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
+    "temporalio",
     "openai",
     "google-genai",
 ]
@@ -31,6 +48,8 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "ruff",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
 ]
 
 [project.scripts]

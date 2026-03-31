@@ -7,6 +7,7 @@ build/
 *.egg
 
 .env
+.env.*
 .venv/
 venv/
 
@@ -18,3 +19,28 @@ venv/
 sessions/
 memory/
 exec-approvals.json
+
+# Docker
+*.log
+temporal_pgdata/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node packages
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Dashboard build output
+dashboard/build/
+dashboard/.cache/
+

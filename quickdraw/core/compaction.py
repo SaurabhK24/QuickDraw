@@ -6,6 +6,7 @@ by the LLM and replaced with a condensed summary, preserving key facts.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -67,17 +68,19 @@ class Compactor:
         recent_messages = messages[split:]
 
         try:
-            summary_response = self._llm.complete(
-                model=self._model,
-                max_tokens=SUMMARY_MAX_TOKENS,
-                system="",
-                tools=None,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": COMPACTION_PROMPT + json.dumps(old_messages, indent=2),
-                    }
-                ],
+            summary_response = await asyncio.to_thread(
+                lambda: self._llm.complete(
+                    model=self._model,
+                    max_tokens=SUMMARY_MAX_TOKENS,
+                    system="",
+                    tools=None,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": COMPACTION_PROMPT + json.dumps(old_messages, indent=2),
+                        }
+                    ],
+                )
             )
 
             if summary_response.stop_reason == "error":

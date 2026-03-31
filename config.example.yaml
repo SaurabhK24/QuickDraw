@@ -3,6 +3,15 @@
 
 workspace: ~/.quickdraw
 
+# --- Platform Database (optional) ---
+# When set, QuickDraw records runs, audit events, and platform state to Postgres.
+# Requires: pip install 'quickdraw[platform]'
+# database_url: postgresql+asyncpg://quickdraw:quickdraw@localhost:5432/quickdraw
+
+# --- Temporal (optional) ---
+# When set, QuickDraw can submit durable runs to a Temporal cluster.
+# temporal_address: localhost:7233
+
 # --- LLM Provider ---
 llm:
   # Back-compat (single provider):
@@ -51,10 +60,10 @@ channels:
     session_scope: per-user  # per-user | per-channel | per-channel-peer
 
   # Signal — via signal-cli REST API (Docker)
-  # Requires: docker run -d -p 8080:8080 -v ./signal-data:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api
+  # Requires: docker run -d -p 8081:8080 -v ./signal-data:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api
   signal:
     enabled: false
-    api_url: http://localhost:8080
+    api_url: http://localhost:8081
     number: ${SIGNAL_NUMBER}        # Your registered Signal number (e.g. +1234567890)
     session_scope: per-channel      # per-user | per-channel | per-channel-peer
     poll_interval: 1.0              # Seconds between polling for new messages
@@ -64,6 +73,16 @@ channels:
     enabled: false
     port: 5000
     host: 127.0.0.1
+
+  # Microsoft Teams — Bot Framework webhook
+  # Requires: pip install 'quickdraw[teams]'
+  # Register a bot at https://dev.botframework.com and set the messaging
+  # endpoint to https://<your-host>/api/messages
+  teams:
+    enabled: false
+    app_id: ${MS_APP_ID}
+    app_password: ${MS_APP_PASSWORD}
+    port: 3978
 
 # --- Heartbeats ---
 # Scheduled agent tasks. Each heartbeat runs on a cron schedule with its

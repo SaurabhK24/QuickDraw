@@ -1,0 +1,151 @@
+services:
+  # Temporal's internal database -- NOT used by QuickDraw app
+  temporal-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    ports:
+      - "5433:5432"
+    volumes:
+      - temporal_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    ports:
+      - "7233:7233"
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: temporal-db
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+
+  temporal-ui:
+    image: temporalio/ui:latest
+    ports:
+      - "8233:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on:
+      - temporal
+
+  quickdraw-python:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      MS_APP_ID: ${MS_APP_ID:-}
+      MS_APP_PASSWORD: ${MS_APP_PASSWORD:-}
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+    ports:
+      - "5050:5000"
+      - "3978:3978"
+    volumes:
+      - ./packs:/app/.quickdraw/packs:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /app/.quickdraw/sessions /app/.quickdraw/memory
+        cp /app/SOUL.md /app/.quickdraw/SOUL.md
+        python -c "
+        import os, yaml
+        channels = {'http': {'enabled': True, 'port': 5000, 'host': '0.0.0.0'}}
+        if os.environ.get('MS_APP_ID'):
+            channels['teams'] = {
+                'enabled': True,
+                'app_id': os.environ['MS_APP_ID'],
+                'app_password': os.environ.get('MS_APP_PASSWORD', ''),
+                'app_type': 'SingleTenant',
+                'tenant_id': os.environ.get('MS_TENANT_ID', ''),
+                'port': 3978,
+                'host': '0.0.0.0',
+            }
+        cfg = {
+          'workspace': '/app/.quickdraw',
+          'temporal_address': 'temporal:7233',
+          'llm': {'provider': 'anthropic', 'model': 'claude-sonnet-4-5-20250929', 'max_tokens': 4096},
+          'agents': {'main': {'name': 'Jarvis', 'soul': 'SOUL.md'}},
+          'channels': channels,
+          'permissions': {'mode': 'record', 'safe_commands': ['ls','cat','echo','date','pwd','whoami']},
+        }
+        yaml.dump(cfg, open('/tmp/config.yaml', 'w'))
+        "
+        until python -c "import socket; s=socket.create_connection(('temporal',7233),2); s.close()" 2>/dev/null; do
+          sleep 3
+        done
+        exec python -m quickdraw run --config /tmp/config.yaml
+    depends_on:
+      - temporal
+
+  quickdraw-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # route_message still calls Anthropic directly for routing classification
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      TEMPORAL_ADDRESS: temporal:7233
+      # all agent-turn LLM execution is delegated to the gateway service
+      QUICKDRAW_GATEWAY_URL: http://quickdraw-python:5000
+    volumes:
+      - ./packs:/app/.quickdraw/packs:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /app/.quickdraw/sessions /app/.quickdraw/memory
+        cp /app/SOUL.md /app/.quickdraw/SOUL.md
+        echo "Waiting for Temporal..."
+        until python -c "import socket; s=socket.create_connection(('temporal',7233),2); s.close()" 2>/dev/null; do
+          sleep 3
+        done
+        echo "Waiting for gateway..."
+        until python -c "import urllib.request; urllib.request.urlopen('http://quickdraw-python:5000/health', timeout=2)" 2>/dev/null; do
+          sleep 3
+        done
+        echo "Gateway reachable, starting worker"
+        exec python -m quickdraw.workflows.worker
+    restart: on-failure
+    depends_on:
+      - temporal
+      - quickdraw-python
+
+  controlplane:
+    build:
+      context: controlplane/
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8080"
+      PYTHON_BACKEND: http://quickdraw-python:5000
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "8080:8080"
+    depends_on:
+      - quickdraw-python
+      - temporal
+
+  dashboard:
+    build:
+      context: dashboard/
+      dockerfile: Dockerfile
+    environment:
+      API_URL: http://controlplane:8080/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - controlplane
+
+volumes:
+  temporal_pgdata:

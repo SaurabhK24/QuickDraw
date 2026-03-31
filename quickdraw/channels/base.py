@@ -8,6 +8,9 @@ from typing import Any, Awaitable, Callable
 ReplyFn = Callable[[str], Awaitable[None]]
 MessageCallback = Callable[[str, str, ReplyFn], Awaitable[None]]
 
+# (agent_id, session_key, user_text, model, max_tokens) -> dict
+RunTurnCallback = Callable[[str, str, str, str, int], Awaitable[dict]]
+
 
 class ChannelAdapter(ABC):
     """Base interface for all messaging channel adapters.
@@ -20,6 +23,7 @@ class ChannelAdapter(ABC):
         self.channel_id = channel_id
         self.settings = settings
         self._on_message: MessageCallback | None = None
+        self._on_run_turn: RunTurnCallback | None = None
 
     def set_message_callback(self, callback: MessageCallback) -> None:
         """Set the callback invoked when a message arrives.
@@ -27,6 +31,13 @@ class ChannelAdapter(ABC):
         callback(session_key, user_text, reply_fn)
         """
         self._on_message = callback
+
+    def set_run_turn_callback(self, callback: RunTurnCallback) -> None:
+        """Set the callback for direct agent-turn execution.
+
+        callback(agent_id, session_key, user_text, model, max_tokens) -> dict
+        """
+        self._on_run_turn = callback
 
     @abstractmethod
     async def start(self) -> None:

@@ -1,0 +1,174 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-zinc-950 text-zinc-100 antialiased;
+  }
+
+  ::selection {
+    @apply bg-sand-400/30 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-zinc-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-700 rounded-full;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-zinc-900 border border-zinc-800 rounded-xl;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-200 hover:border-zinc-700 hover:shadow-lg hover:shadow-black/20;
+  }
+
+  .btn-primary {
+    @apply bg-sand-500 text-white font-medium px-4 py-2 rounded-lg
+           transition-all duration-150 hover:bg-sand-400
+           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-zinc-800 text-zinc-200 font-medium px-4 py-2 rounded-lg border border-zinc-700
+           transition-all duration-150 hover:bg-zinc-700 hover:border-zinc-600
+           active:scale-[0.98];
+  }
+
+  .input {
+    @apply bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100
+           placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sand-500/50
+           focus:border-sand-500 transition-all;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-trust {
+    @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20;
+  }
+  .badge-resistance {
+    @apply badge bg-red-500/15 text-red-400 border border-red-500/20;
+  }
+  .badge-engagement {
+    @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/20;
+  }
+  .badge-load {
+    @apply badge bg-yellow-500/15 text-yellow-400 border border-yellow-500/20;
+  }
+  .badge-salience {
+    @apply badge bg-violet-500/15 text-violet-400 border border-violet-500/20;
+  }
+
+  .signal-bar {
+    @apply h-2 rounded-full;
+  }
+
+  .markdown {
+    @apply text-zinc-300 text-sm leading-relaxed;
+  }
+  .markdown h1 {
+    @apply text-xl font-bold text-zinc-100 mt-6 mb-3 pb-2 border-b border-zinc-800;
+  }
+  .markdown h2 {
+    @apply text-lg font-semibold text-zinc-100 mt-5 mb-2.5;
+  }
+  .markdown h3 {
+    @apply text-base font-semibold text-zinc-200 mt-4 mb-2;
+  }
+  .markdown h4 {
+    @apply text-sm font-semibold text-zinc-200 mt-3 mb-1.5;
+  }
+  .markdown p {
+    @apply mb-3 last:mb-0;
+  }
+  .markdown strong {
+    @apply font-semibold text-zinc-100;
+  }
+  .markdown em {
+    @apply italic text-zinc-400;
+  }
+  .markdown a {
+    @apply text-sand-400 hover:text-sand-300 underline underline-offset-2;
+  }
+  .markdown ul {
+    @apply list-disc pl-5 mb-3 space-y-1;
+  }
+  .markdown ol {
+    @apply list-decimal pl-5 mb-3 space-y-1;
+  }
+  .markdown li {
+    @apply text-zinc-300;
+  }
+  .markdown li > p {
+    @apply mb-1;
+  }
+  .markdown blockquote {
+    @apply border-l-2 border-sand-500/40 pl-4 my-3 text-zinc-400 italic;
+  }
+  .markdown code {
+    @apply font-mono text-xs bg-zinc-800 text-sand-300 px-1.5 py-0.5 rounded;
+  }
+  .markdown pre {
+    @apply bg-zinc-800/80 border border-zinc-700/50 rounded-lg p-4 my-3 overflow-x-auto;
+  }
+  .markdown pre code {
+    @apply bg-transparent p-0 text-zinc-300;
+  }
+  .markdown hr {
+    @apply border-zinc-800 my-4;
+  }
+  .markdown table {
+    @apply w-full my-3 text-xs;
+  }
+  .markdown thead {
+    @apply border-b border-zinc-700;
+  }
+  .markdown th {
+    @apply text-left py-2 px-3 font-semibold text-zinc-200 bg-zinc-800/50;
+  }
+  .markdown th:first-child {
+    @apply rounded-tl-lg;
+  }
+  .markdown th:last-child {
+    @apply rounded-tr-lg;
+  }
+  .markdown td {
+    @apply py-2 px-3 border-b border-zinc-800/50;
+  }
+  .markdown tbody tr:hover {
+    @apply bg-zinc-800/30;
+  }
+  .markdown img {
+    @apply rounded-lg my-3 max-w-full;
+  }
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2s ease-in-out infinite;
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}

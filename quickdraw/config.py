@@ -96,6 +96,8 @@ class Config:
     channels: dict[str, ChannelConfig]
     heartbeats: dict[str, HeartbeatConfig]
     permissions: PermissionsConfig
+    database_url: str | None = None
+    temporal_address: str | None = None
 
     @property
     def sessions_dir(self) -> Path:
@@ -194,6 +196,14 @@ def load_config(path: str | Path) -> Config:
         safe_commands=perm_raw.get("safe_commands", default_safe),
     )
 
+    database_url = raw.get("database_url")
+    if isinstance(database_url, str):
+        database_url = _resolve_env_vars(database_url)
+
+    temporal_address = raw.get("temporal_address")
+    if isinstance(temporal_address, str):
+        temporal_address = _resolve_env_vars(temporal_address)
+
     return Config(
         workspace=workspace,
         llm=llm,
@@ -201,4 +211,6 @@ def load_config(path: str | Path) -> Config:
         channels=channels,
         heartbeats=heartbeats,
         permissions=permissions,
+        database_url=database_url,
+        temporal_address=temporal_address,
     )
