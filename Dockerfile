@@ -5,7 +5,7 @@ COPY pyproject.toml README.md ./
 COPY quickdraw/ quickdraw/
 COPY SOUL.md config.example.yaml ./
 
-RUN pip install --no-cache-dir -e '.[teams]' temporalio
+RUN pip install --no-cache-dir -e '.[teams,llm]' temporalio
 
 EXPOSE 5000 3978
 

@@ -60,6 +60,8 @@ function getOrCreateSessionKey(): string {
 
 function getApiBase(): string {
   if (typeof window === "undefined") return "http://localhost:8080";
+  const envBase = (window as any).ENV?.API_BASE;
+  if (envBase) return envBase;
   return `${window.location.protocol}//${window.location.hostname}:8080`;
 }
 
@@ -83,9 +85,9 @@ export function useChat(): UseChatReturn {
       .then((data) => {
         if (data.messages && data.messages.length > 0) {
           const restored: ChatMessage[] = data.messages.map(
-            (m: { role: string; content: string }, i: number) => ({
+            (m: { role?: string; type?: string; content: string }, i: number) => ({
               id: `restored-${i}`,
-              role: m.role as "user" | "assistant",
+              role: (m.role || m.type || "assistant") as "user" | "assistant",
               content: m.content,
               timestamp: Date.now() - (data.messages.length - i) * 1000,
             })

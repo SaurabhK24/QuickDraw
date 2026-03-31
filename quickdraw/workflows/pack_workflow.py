@@ -29,6 +29,13 @@ _RETRY = RetryPolicy(
 
 
 @dataclass
+class StepApprovalInput:
+    """Cross-language signal payload for approve_step."""
+    step_index: int = 0
+    approved: bool = False
+
+
+@dataclass
 class WorkflowStepDef:
     agent_id: str
     pack_id: str
@@ -174,8 +181,8 @@ class PackMultiStepWorkflow:
         )
 
     @workflow.signal
-    async def approve_step(self, step_index: int, approved: bool) -> None:
-        self._step_approvals[step_index] = approved
+    async def approve_step(self, data: StepApprovalInput) -> None:
+        self._step_approvals[data.step_index] = data.approved
 
     @workflow.query
     def get_progress(self) -> dict:

@@ -6,6 +6,7 @@ and repeats until the model produces a final response or hits the turn limit.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -40,12 +41,14 @@ class AgentLoop:
         tool_defs = self._registry.definitions()
 
         for turn in range(MAX_TOOL_TURNS):
-            response = self._llm.complete(
-                messages=messages,
-                system=system_prompt,
-                model=model,
-                max_tokens=max_tokens,
-                tools=tool_defs if tool_defs else None,
+            response = await asyncio.to_thread(
+                lambda: self._llm.complete(
+                    messages=messages,
+                    system=system_prompt,
+                    model=model,
+                    max_tokens=max_tokens,
+                    tools=tool_defs if tool_defs else None,
+                )
             )
 
             if response.stop_reason == "error":

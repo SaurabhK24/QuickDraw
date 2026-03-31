@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -180,7 +182,8 @@ func CancelRun(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type approvalRequest struct {
-	Approved bool `json:"approved"`
+	Approved  bool `json:"approved"`
+	StepIndex *int `json:"step_index,omitempty"`
 }
 
 func ApprovalDecision(w http.ResponseWriter, r *http.Request) {
@@ -192,9 +195,16 @@ func ApprovalDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := temporal.SignalApproval(r.Context(), workflowID, body.Approved); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "failed to signal approval: "+err.Error())
-		return
+	if body.StepIndex != nil {
+		if err := temporal.SignalStepApproval(r.Context(), workflowID, *body.StepIndex, body.Approved); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "failed to signal step approval: "+err.Error())
+			return
+		}
+	} else {
+		if err := temporal.SignalApproval(r.Context(), workflowID, body.Approved); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "failed to signal approval: "+err.Error())
+			return
+		}
 	}
 
 	jsonResp(w, http.StatusOK, map[string]any{
@@ -260,12 +270,16 @@ func ChatSend(w http.ResponseWriter, r *http.Request) {
 		body.Model = "claude-sonnet-4-5-20250929"
 	}
 
+	chatMaxTokens := 8192
+	if body.Model != "" {
+		chatMaxTokens = 4096
+	}
 	input := temporal.RouterInput{
 		TenantID:           tenant(r),
 		SessionKey:         body.SessionKey,
 		UserText:           body.UserText,
 		Model:              body.Model,
-		MaxTokens:          8192,
+		MaxTokens:          chatMaxTokens,
 		PackContext:        temporal.PackContext,
 		AvailableWorkflows: temporal.AvailableWorkflows,
 	}
@@ -365,8 +379,11 @@ func fetchDelegationProgress(sessionKey string, since int) ([]map[string]any, in
 	if PythonBackend == "" {
 		return nil, since
 	}
-	url := fmt.Sprintf("%s/progress?key=%s&since=%d", PythonBackend, sessionKey, since)
-	resp, err := http.Get(url)
+	params := url.Values{}
+	params.Set("key", sessionKey)
+	params.Set("since", strconv.Itoa(since))
+	fetchURL := fmt.Sprintf("%s/progress?%s", PythonBackend, params.Encode())
+	resp, err := http.Get(fetchURL)
 	if err != nil || resp.StatusCode != 200 {
 		return nil, since
 	}

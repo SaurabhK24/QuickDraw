@@ -60,10 +60,10 @@ channels:
     session_scope: per-user  # per-user | per-channel | per-channel-peer
 
   # Signal — via signal-cli REST API (Docker)
-  # Requires: docker run -d -p 8080:8080 -v ./signal-data:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api
+  # Requires: docker run -d -p 8081:8080 -v ./signal-data:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api
   signal:
     enabled: false
-    api_url: http://localhost:8080
+    api_url: http://localhost:8081
     number: ${SIGNAL_NUMBER}        # Your registered Signal number (e.g. +1234567890)
     session_scope: per-channel      # per-user | per-channel | per-channel-peer
     poll_interval: 1.0              # Seconds between polling for new messages

@@ -142,9 +142,22 @@ def load_pack(pack_dir: Path) -> Pack | None:
 
 
 def _install_pack_requirements(pack: Pack) -> None:
-    """Install dependencies from the pack's requirements.txt if present."""
+    """Install dependencies from the pack's requirements.txt if present.
+
+    Gated behind the ALLOW_PACK_DEPS environment variable to prevent
+    untrusted packs from installing arbitrary packages at runtime.
+    """
     req_path = pack.directory / "requirements.txt"
     if not req_path.exists():
+        return
+
+    import os
+    if not os.environ.get("ALLOW_PACK_DEPS", "").lower() in ("1", "true", "yes"):
+        logger.warning(
+            "Pack %s has requirements.txt but ALLOW_PACK_DEPS is not set — skipping install. "
+            "Set ALLOW_PACK_DEPS=true to allow runtime dependency installation.",
+            pack.id,
+        )
         return
 
     import subprocess

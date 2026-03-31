@@ -8,6 +8,7 @@ Anthropic API connections; the worker owns sequencing, retries, and approvals.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -100,16 +101,25 @@ async def execute_agent_turn(input: AgentRunInput) -> AgentRunOutput:
         "max_tokens": input.max_tokens,
     }
 
+    async def _heartbeat_loop(interval: float = 10.0) -> None:
+        while True:
+            activity.heartbeat()
+            await asyncio.sleep(interval)
+
     async with aiohttp.ClientSession() as session:
-        async with session.post(
-            f"{_GATEWAY_URL}/run-turn",
-            json=payload,
-            timeout=aiohttp.ClientTimeout(total=300),
-        ) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                raise RuntimeError(f"Gateway /run-turn returned {resp.status}: {body[:200]}")
-            data = await resp.json()
+        heartbeat_task = asyncio.create_task(_heartbeat_loop())
+        try:
+            async with session.post(
+                f"{_GATEWAY_URL}/run-turn",
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=300),
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise RuntimeError(f"Gateway /run-turn returned {resp.status}: {body[:200]}")
+                data = await resp.json()
+        finally:
+            heartbeat_task.cancel()
 
     return AgentRunOutput(
         response_text=data.get("response_text", ""),

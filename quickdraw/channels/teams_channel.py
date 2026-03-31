@@ -175,9 +175,12 @@ class TeamsChannel(ChannelAdapter):
         if not ref:
             logger.warning("No conversation reference for session %s", session_key)
             return
+        async def _callback(ctx: TurnContext) -> None:
+            await ctx.send_activity(message)
+
         await self._adapter.continue_conversation(
             ref,
-            lambda ctx: ctx.send_activity(message),
+            _callback,
             self._app_id,
         )
 

@@ -11,6 +11,8 @@ export interface SessionSummary {
 
 function getApiBase(): string {
   if (typeof window === "undefined") return "http://localhost:8080";
+  const envBase = (window as any).ENV?.API_BASE;
+  if (envBase) return envBase;
   return `${window.location.protocol}//${window.location.hostname}:8080`;
 }
 

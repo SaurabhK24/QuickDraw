@@ -25,6 +25,15 @@ with workflow.unsafe.imports_passed_through():
         RouteInput,
         RouteOutput,
     )
+    from quickdraw.workflows.supervisor_workflow import (
+        SupervisorWorkflow,
+        SupervisorInput,
+    )
+    from quickdraw.workflows.pack_workflow import (
+        PackMultiStepWorkflow,
+        PackWorkflowInput,
+        WorkflowStepDef,
+    )
 
 _RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=2),
@@ -81,11 +90,6 @@ class RouterWorkflow:
 
         # --- supervisor: autonomous orchestration via delegation tools ---
         if route.route_type == "supervisor":
-            from quickdraw.workflows.supervisor_workflow import (
-                SupervisorWorkflow,
-                SupervisorInput,
-            )
-
             sup_result = await workflow.execute_child_workflow(
                 SupervisorWorkflow.run,
                 SupervisorInput(
@@ -118,12 +122,6 @@ class RouterWorkflow:
                 )
 
             if wf_def:
-                from quickdraw.workflows.pack_workflow import (
-                    PackMultiStepWorkflow,
-                    PackWorkflowInput,
-                    WorkflowStepDef,
-                )
-
                 steps = [
                     WorkflowStepDef(
                         agent_id=s["agent"],

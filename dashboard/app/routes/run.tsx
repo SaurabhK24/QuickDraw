@@ -86,7 +86,10 @@ export default function RunPage() {
 
   const apiBase =
     typeof window !== "undefined"
-      ? `${window.location.protocol}//${window.location.hostname}:8080/v1`
+      ? `${(() => {
+          const envBase = (window as any).ENV?.API_BASE;
+          return envBase ? `${envBase}/v1` : `${window.location.protocol}//${window.location.hostname}:8080/v1`;
+        })()}`
       : "";
   const sseUrl =
     hasRun ? `${apiBase}/events/stream?workflow_id=${result.workflow_id}` : null;

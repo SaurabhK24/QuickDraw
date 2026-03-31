@@ -91,6 +91,8 @@ def register(
     depth: int = 0,
     max_depth: int = 4,
     progress_fn: ProgressFn | None = None,
+    default_model: str = "claude-sonnet-4-5-20250929",
+    default_max_tokens: int = 4096,
 ) -> None:
     """Register delegation, parallel delegation, and agent-discovery tools."""
 
@@ -140,6 +142,8 @@ def register(
                 agent_id=agent_id,
                 session_key=delegate_session,
                 user_text=full_prompt,
+                model=default_model,
+                max_tokens=default_max_tokens,
                 _delegation_depth=depth + 1,
                 _workflow_key=workflow_key,
             )
@@ -210,6 +214,8 @@ def register(
                     agent_id=agent_id,
                     session_key=session,
                     user_text=full_prompt,
+                    model=default_model,
+                    max_tokens=default_max_tokens,
                     _delegation_depth=depth + 1,
                     _workflow_key=workflow_key,
                 )

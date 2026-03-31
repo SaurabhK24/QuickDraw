@@ -1,4 +1,5 @@
 import { NavLink } from "@remix-run/react";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   Play,
@@ -16,7 +17,28 @@ const NAV_ITEMS = [
   { to: "/packs", icon: Package, label: "Packs" },
 ] as const;
 
+function getApiBase(): string {
+  if (typeof window === "undefined") return "http://localhost:8080";
+  const envBase = (window as any).ENV?.API_BASE;
+  if (envBase) return envBase;
+  return `${window.location.protocol}//${window.location.hostname}:8080`;
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
+  const [healthOk, setHealthOk] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      fetch(`${getApiBase()}/health`)
+        .then((r) => { if (!cancelled) setHealthOk(r.ok); })
+        .catch(() => { if (!cancelled) setHealthOk(false); });
+    };
+    check();
+    const id = setInterval(check, 15_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -62,8 +84,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Footer */}
         <div className="p-4 border-t border-zinc-800">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-slow" />
-            <span className="text-xs text-zinc-500">Temporal connected</span>
+            <div
+              className={`w-2 h-2 rounded-full ${
+                healthOk === true
+                  ? "bg-emerald-500 animate-pulse-slow"
+                  : healthOk === false
+                  ? "bg-red-500"
+                  : "bg-zinc-600"
+              }`}
+            />
+            <span className="text-xs text-zinc-500">
+              {healthOk === true
+                ? "Control plane connected"
+                : healthOk === false
+                ? "Control plane offline"
+                : "Checking..."}
+            </span>
           </div>
           <p className="text-[10px] text-zinc-600 mt-1.5">
             tenant: default

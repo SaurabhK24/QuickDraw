@@ -8,12 +8,21 @@ session and is readable by every agent in the delegation chain.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 from quickdraw.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_key(key: str) -> str:
+    """Sanitize a memory key to prevent path traversal."""
+    key = re.sub(r'[/\\]', '_', key)
+    key = key.replace('..', '_')
+    key = key.strip('. ')
+    return key or '_blank'
 
 WRITE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -58,16 +67,18 @@ def register(registry: ToolRegistry, memory_dir: Path, namespace: str) -> None:
     ns_dir = memory_dir / "shared" / safe_ns
 
     def shared_memory_write(key: str, value: str) -> str:
+        safe = _safe_key(key)
         ns_dir.mkdir(parents=True, exist_ok=True)
-        (ns_dir / f"{key}.md").write_text(value)
-        return f"Stored '{key}' in shared workflow memory ({len(value)} chars)."
+        (ns_dir / f"{safe}.md").write_text(value)
+        return f"Stored '{safe}' in shared workflow memory ({len(value)} chars)."
 
     def shared_memory_read(key: str) -> str:
-        path = ns_dir / f"{key}.md"
+        safe = _safe_key(key)
+        path = ns_dir / f"{safe}.md"
         if not path.exists():
             available = [p.stem for p in ns_dir.glob("*.md")] if ns_dir.exists() else []
             hint = f" Available keys: {', '.join(available)}" if available else ""
-            return f"No data found for key '{key}'.{hint}"
+            return f"No data found for key '{safe}'.{hint}"
         return path.read_text()
 
     def shared_memory_list() -> str:

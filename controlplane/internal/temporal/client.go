@@ -131,6 +131,18 @@ func SignalApproval(ctx context.Context, workflowID string, approved bool) error
 	return Client.SignalWorkflow(ctx, workflowID, "", "approve", approved)
 }
 
+type StepApprovalData struct {
+	StepIndex int  `json:"step_index"`
+	Approved  bool `json:"approved"`
+}
+
+func SignalStepApproval(ctx context.Context, workflowID string, stepIndex int, approved bool) error {
+	return Client.SignalWorkflow(ctx, workflowID, "", "approve_step", StepApprovalData{
+		StepIndex: stepIndex,
+		Approved:  approved,
+	})
+}
+
 // RouterInput matches the Python RouterInput dataclass.
 type RouterInput struct {
 	TenantID           string                   `json:"tenant_id"`

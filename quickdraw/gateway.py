@@ -294,6 +294,8 @@ class Gateway:
                 workflow_key=workflow_key,
                 depth=_delegation_depth,
                 progress_fn=progress_fn,
+                default_model=model,
+                default_max_tokens=max_tokens,
             )
 
         # --- swarm: shared workflow memory ---
@@ -350,8 +352,13 @@ class Gateway:
         async def _write(event: dict) -> None:
             event.setdefault("ts", time.time())
             progress_dir.mkdir(parents=True, exist_ok=True)
-            with open(path, "a") as f:
-                f.write(json.dumps(event) + "\n")
+            line = json.dumps(event) + "\n"
+
+            def _append() -> None:
+                with open(path, "a") as f:
+                    f.write(line)
+
+            await asyncio.to_thread(_append)
 
         return _write
 
